@@ -171,11 +171,11 @@ public static partial class EventBetter
 
         bool hadActiveHandlers = false;
 
+        var invocationCount = ++entry.invocationCount;
+        var args = s_args;
+
         try
         {
-            ++entry.invocationCount;
-            var args = s_args;
-
             for (int i = 0; i < entry.Count; ++i)
             {
                 var host = GetAliveTarget(entry.hosts[i]);
@@ -202,7 +202,7 @@ public static partial class EventBetter
 
                     hadActiveHandlers = true;
                 }
-                else if (entry.invocationCount == 1)
+                else if (invocationCount == 1)
                 {
                     // it's OK to compact now
                     entry.RemoveAt(i);
@@ -216,13 +216,14 @@ public static partial class EventBetter
                 }
             }
 
-            if ( entry.invocationCount == 1 && entry.needsCleanup )
+            if (invocationCount == 1 && entry.needsCleanup )
             {
                 CleanUpEntry(entry);
             }
         }
         finally
         {
+            UnityEngine.Debug.Assert(invocationCount == entry.invocationCount);
             --entry.invocationCount;
         }
 
