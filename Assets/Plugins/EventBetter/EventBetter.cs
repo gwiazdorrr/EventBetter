@@ -1,12 +1,13 @@
-﻿using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.Diagnostics.Contracts;
-using System.Linq;
-using System.Reflection;
-using System.Text;
-using UnityEngine;
+﻿// EventBetter
+// Copyright (c) 2018, Piotr Gwiazdowski <gwiazdorrr+github at gmail.com>
 
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+
+/// <summary>
+/// Intentionally made partial, in case you want to extend it easily.
+/// </summary>
 public static partial class EventBetter
 {
     /// <summary>
@@ -30,9 +31,16 @@ public static partial class EventBetter
     public static void Register<HostType, MessageType>(this HostType host, System.Action<MessageType> handler)
         where HostType : UnityEngine.Object
     {
-        RegisterDeleakifiedHandler(host, handler);
+        RegisterWeakifiedHandler(host, handler);
     }
 
+    /// <summary>
+    /// Register a message handler. No host, you unregister by calling <see cref="IDisposable.Dispose">Dispose</see> on returned object.
+    /// Handler is not limited in what it is allowed to capture.
+    /// </summary>
+    /// <typeparam name="MessageType"></typeparam>
+    /// <param name="handler"></param>
+    /// <returns></returns>
     public static IDisposable RegisterManual<MessageType>(System.Action<MessageType> handler)
     {
         // use the dict as a host here, it will ensure the handler is going to live forever
@@ -44,11 +52,23 @@ public static partial class EventBetter
         };
     }
 
+    /// <summary>
+    /// Invoke all registered handlers for this message type immediately.
+    /// </summary>
+    /// <typeparam name="MessageType"></typeparam>
+    /// <param name="message"></param>
+    /// <returns>True if there are any handlers for this message type, false otherwise.</returns>
     public static bool Raise<MessageType>(MessageType message)
     {
         return Raise(message, typeof(MessageType));
     }
 
+    /// <summary>
+    /// Unregisters all <typeparamref name="MessageType"/> handlers for a given host.
+    /// </summary>
+    /// <typeparam name="MessageType"></typeparam>
+    /// <param name="host"></param>
+    /// <returns>True if there were any handlers, false otherwise.</returns>
     public static bool Unregister<MessageType>(UnityEngine.Object host)
     {
         if (host == null)
@@ -57,6 +77,11 @@ public static partial class EventBetter
         return UnregisterInternal(typeof(MessageType), host, (eventEntry, index, referenceHost) => object.ReferenceEquals(eventEntry.hosts[index].Target, referenceHost));
     }
 
+    /// <summary>
+    /// Unregisters all message types for a given host.
+    /// </summary>
+    /// <param name="host"></param>
+    /// <returns>True if there were any handlers, false otherwise.</returns>
     public static bool UnregisterAll(UnityEngine.Object host)
     {
         if (host == null)
@@ -71,10 +96,15 @@ public static partial class EventBetter
         return anyListeners;
     }
 
+    /// <summary>
+    /// Unregisters everything.
+    /// </summary>
     public static void Clear()
     {
         s_entries.Clear();
     }
+
+    #region Private
 
     private class ManualHandlerDisposable : IDisposable
     {
@@ -101,8 +131,31 @@ public static partial class EventBetter
     {
         public uint invocationCount = 0;
         public bool needsCleanup = false;
-        public List<WeakReference> hosts = new List<WeakReference>();
-        public List<Delegate> handlers = new List<Delegate>();
+        public readonly List<WeakReference> hosts = new List<WeakReference>();
+        public readonly List<Delegate> handlers = new List<Delegate>();
+
+        public int Count => hosts.Count;
+
+        public void Add(WeakReference host, Delegate handler)
+        {
+            UnityEngine.Debug.Assert(hosts.Count == handlers.Count);
+            hosts.Add(host);
+            handlers.Add(handler);
+        }
+
+        public void NullifyAt(int i)
+        {
+            UnityEngine.Debug.Assert(hosts.Count == handlers.Count);
+            hosts[i] = null;
+            handlers[i] = null;
+        }
+
+        public void RemoveAt(int i)
+        {
+            UnityEngine.Debug.Assert(hosts.Count == handlers.Count);
+            hosts.RemoveAt(i);
+            handlers.RemoveAt(i);
+        }
     }
 
     private static Dictionary<Type, EventEntry> s_entries = new Dictionary<Type, EventEntry>();
@@ -118,15 +171,12 @@ public static partial class EventBetter
 
         bool hadActiveHandlers = false;
 
-        var args = s_args;
-        // do this instead in case of some weird bugs
-        // var args = new object[2];
-
         try
         {
             ++entry.invocationCount;
+            var args = s_args;
 
-            for (int i = 0; i < entry.hosts.Count; ++i)
+            for (int i = 0; i < entry.Count; ++i)
             {
                 var host = GetAliveTarget(entry.hosts[i]);
 
@@ -134,10 +184,13 @@ public static partial class EventBetter
                 {
                     var handler = entry.handlers[i];
 
-                    // premature optimization - don't need to allocate anything!
-                    // it depends, but this "might" lead to some interesting bugs in case of nested invokes
                     try
                     {
+                        // This prevents the code from allocating anything, making it effectively single-threaded - that's fine,
+                        // since it revolves around UnityEngine.Objects, which are inherently single-threaded.
+                        // Also, this *seems* to be safe, as DynamicInvoke eventually calls MethodBase.CheckArguments,
+                        // and it copies the array
+                        // https://github.com/Microsoft/referencesource/blob/60a4f8b853f60a424e36c7bf60f9b5b5f1973ed1/mscorlib/system/reflection/methodbase.cs#L338
                         args[0] = host;
                         args[1] = message;
                         handler.DynamicInvoke(args);
@@ -152,16 +205,14 @@ public static partial class EventBetter
                 else if (entry.invocationCount == 1)
                 {
                     // it's OK to compact now
-                    entry.hosts.RemoveAt(i);
-                    entry.handlers.RemoveAt(i);
+                    entry.RemoveAt(i);
                     --i;
                 }
                 else
                 {
                     // need to wait
                     entry.needsCleanup = true;
-                    entry.hosts[i] = null;
-                    entry.handlers[i] = null;
+                    entry.NullifyAt(i);
                 }
             }
 
@@ -199,8 +250,7 @@ public static partial class EventBetter
             s_entries.Add(messageType, entry);
         }
 
-        entry.hosts.Add(new WeakReference(host));
-        entry.handlers.Add(handler);
+        entry.Add(new WeakReference(host), handler);
 
         return handler;
     }
@@ -215,7 +265,7 @@ public static partial class EventBetter
 
         bool found = false;
 
-        for ( int i = 0; i < entry.handlers.Count; ++i )
+        for ( int i = 0; i < entry.Count; ++i )
         {
             if (entry.hosts[i] == null)
                 continue;
@@ -227,23 +277,21 @@ public static partial class EventBetter
             if (entry.invocationCount == 0)
             {
                 // it's ok to compact now
-                entry.hosts.RemoveAt(i);
-                entry.handlers.RemoveAt(i);
+                entry.RemoveAt(i);
                 --i;
             }
             else
             {
                 // need to wait
                 entry.needsCleanup = true;
-                entry.hosts[i] = null;
-                entry.handlers[i] = null;
+                entry.NullifyAt(i);
             }
         }
 
         return found;
     }
 
-    private static Delegate RegisterDeleakifiedHandler<HostType, MessageType>(HostType host, System.Action<MessageType> handler) where HostType : class
+    private static Delegate RegisterWeakifiedHandler<HostType, MessageType>(HostType host, System.Action<MessageType> handler) where HostType : class
     {
         if (host == null)
             throw new ArgumentNullException("host");
@@ -387,13 +435,14 @@ public static partial class EventBetter
 
     private static void CleanUpEntry(EventEntry entry)
     {
-        for (int i = 0; i < entry.hosts.Count; ++i)
+        for (int i = 0; i < entry.Count; ++i)
         {
             if (GetAliveTarget(entry.hosts[i]) != null)
                 continue;
 
-            entry.hosts.RemoveAt(i);
-            entry.handlers.RemoveAt(i);
+            entry.NullifyAt(i);
         }
     }
+
+    #endregion
 }

@@ -127,30 +127,30 @@ public class EventBetterTests
         public void TestUnregister()
         {
             Assert.AreEqual(false, EventBetter.Unregister<DummyMessage>(this));
-            Assert.AreEqual(false, EventBetter.RaiseImmediate(new DummyMessage()));
+            Assert.AreEqual(false, EventBetter.Raise(new DummyMessage()));
 
             EventBetter.Register(this, (DummyMessage o) => Dummy(null, null));
-            Assert.AreEqual(true, EventBetter.RaiseImmediate(new DummyMessage()));
+            Assert.AreEqual(true, EventBetter.Raise(new DummyMessage()));
             Assert.AreEqual(true, EventBetter.Unregister<DummyMessage>(this));
-            Assert.AreEqual(false, EventBetter.RaiseImmediate(new DummyMessage()));
+            Assert.AreEqual(false, EventBetter.Raise(new DummyMessage()));
 
             EventBetter.Register(this, (DummyMessage o) => Dummy(null, null));
             EventBetter.Register(this, (DummyMessage o) => Dummy(null, null));
             EventBetter.Register(this, (DummyMessage o) => Dummy(null, null));
             EventBetter.Register(this, (DummyMessage o) => Dummy(null, null));
-            Assert.AreEqual(true, EventBetter.RaiseImmediate(new DummyMessage()));
-            Assert.AreEqual(true, EventBetter.Unregister<DummyMessage>(this));
-            Assert.AreEqual(false, EventBetter.Unregister<DummyMessage>(this));
-            Assert.AreEqual(false, EventBetter.Unregister<DummyMessage>(this));
-            Assert.AreEqual(false, EventBetter.Unregister<DummyMessage>(this));
-            Assert.AreEqual(false, EventBetter.Unregister<DummyMessage>(this));
-            Assert.AreEqual(false, EventBetter.RaiseImmediate(new DummyMessage()));
-
-            EventBetter.Register(this, (DummyMessage o) => Dummy(null, null));
+            Assert.AreEqual(true, EventBetter.Raise(new DummyMessage()));
             Assert.AreEqual(true, EventBetter.Unregister<DummyMessage>(this));
             Assert.AreEqual(false, EventBetter.Unregister<DummyMessage>(this));
             Assert.AreEqual(false, EventBetter.Unregister<DummyMessage>(this));
-            Assert.AreEqual(false, EventBetter.RaiseImmediate(new DummyMessage()));
+            Assert.AreEqual(false, EventBetter.Unregister<DummyMessage>(this));
+            Assert.AreEqual(false, EventBetter.Unregister<DummyMessage>(this));
+            Assert.AreEqual(false, EventBetter.Raise(new DummyMessage()));
+
+            EventBetter.Register(this, (DummyMessage o) => Dummy(null, null));
+            Assert.AreEqual(true, EventBetter.Unregister<DummyMessage>(this));
+            Assert.AreEqual(false, EventBetter.Unregister<DummyMessage>(this));
+            Assert.AreEqual(false, EventBetter.Unregister<DummyMessage>(this));
+            Assert.AreEqual(false, EventBetter.Raise(new DummyMessage()));
         }
 
         public void TestNestedRegisterSimple()
@@ -169,13 +169,13 @@ public class EventBetterTests
                 });
             });
 
-            EventBetter.RaiseImmediate(new DummyMessage());
+            EventBetter.Raise(new DummyMessage());
             Assert.AreEqual(2, totalInvocations);
 
-            EventBetter.RaiseImmediate(new DummyMessage());
+            EventBetter.Raise(new DummyMessage());
             Assert.AreEqual(5, totalInvocations);
 
-            EventBetter.RaiseImmediate(new DummyMessage());
+            EventBetter.Raise(new DummyMessage());
             Assert.AreEqual(9, totalInvocations);
         }
 
@@ -196,13 +196,13 @@ public class EventBetterTests
                 }));
             }));
 
-            EventBetter.RaiseImmediate(new DummyMessage());
+            EventBetter.Raise(new DummyMessage());
             Assert.AreEqual(2, totalInvocations);
 
-            EventBetter.RaiseImmediate(new DummyMessage());
+            EventBetter.Raise(new DummyMessage());
             Assert.AreEqual(5, totalInvocations);
 
-            EventBetter.RaiseImmediate(new DummyMessage());
+            EventBetter.Raise(new DummyMessage());
             Assert.AreEqual(9, totalInvocations);
 
             foreach (var handler in manualHandlers)
@@ -223,7 +223,7 @@ public class EventBetterTests
                     ++nestedCalls;
                     if (nestedCalls < 10)
                     {
-                        EventBetter.RaiseImmediate(new DummyMessage());
+                        EventBetter.Raise(new DummyMessage());
                     }
                 }
                 finally
@@ -232,7 +232,7 @@ public class EventBetterTests
                 }
             });
 
-            EventBetter.RaiseImmediate(new DummyMessage());
+            EventBetter.Raise(new DummyMessage());
             Assert.AreEqual(10, totalInvocations);
         }
 
@@ -250,7 +250,7 @@ public class EventBetterTests
                     ++nestedCalls;
                     if (nestedCalls < 10)
                     {
-                        EventBetter.RaiseImmediate(new DummyMessage());
+                        EventBetter.Raise(new DummyMessage());
                     }
                 }
                 finally
@@ -261,7 +261,7 @@ public class EventBetterTests
 
             try
             {
-                EventBetter.RaiseImmediate(new DummyMessage());
+                EventBetter.Raise(new DummyMessage());
                 Assert.AreEqual(10, totalInvocations);
             }
             finally
@@ -291,7 +291,7 @@ public class EventBetterTests
                 ++dummyMessage3Invocations;
 
                 EventBetter.Unregister<DummyMessage3>(this);
-                EventBetter.RaiseImmediate(new DummyMessage());
+                EventBetter.Raise(new DummyMessage());
             });
 
             EventBetter.Register(this, (DummyMessage o) =>
@@ -301,20 +301,20 @@ public class EventBetterTests
                 ++nestedCalls;
                 if (nestedCalls >= 10)
                 {
-                    EventBetter.RaiseImmediate(new DummyMessage2());
-                    EventBetter.RaiseImmediate(new DummyMessage3());
+                    EventBetter.Raise(new DummyMessage2());
+                    EventBetter.Raise(new DummyMessage3());
 
-                    EventBetter.RaiseImmediate(new DummyMessage2());
-                    EventBetter.RaiseImmediate(new DummyMessage3());
+                    EventBetter.Raise(new DummyMessage2());
+                    EventBetter.Raise(new DummyMessage3());
 
-                    EventBetter.RaiseImmediate(new DummyMessage2());
-                    EventBetter.RaiseImmediate(new DummyMessage3());
+                    EventBetter.Raise(new DummyMessage2());
+                    EventBetter.Raise(new DummyMessage3());
                 }
 
-                EventBetter.RaiseImmediate(new DummyMessage());
+                EventBetter.Raise(new DummyMessage());
             });
 
-            EventBetter.RaiseImmediate(new DummyMessage());
+            EventBetter.Raise(new DummyMessage());
             Assert.AreEqual(10, totalInvocations);
             Assert.AreEqual(3, dummyMessage2Invocations);
             Assert.AreEqual(1, dummyMessage3Invocations);
@@ -333,13 +333,13 @@ public class EventBetterTests
                 NestedDifferentContext(totalInvocations);
             });
 
-            EventBetter.RaiseImmediate(new DummyMessage());
+            EventBetter.Raise(new DummyMessage());
             Assert.AreEqual(2, totalInvocations + nestedInvocations);
 
-            EventBetter.RaiseImmediate(new DummyMessage());
+            EventBetter.Raise(new DummyMessage());
             Assert.AreEqual(5, totalInvocations + nestedInvocations);
 
-            EventBetter.RaiseImmediate(new DummyMessage());
+            EventBetter.Raise(new DummyMessage());
             Assert.AreEqual(9, totalInvocations + nestedInvocations);
         }
 
@@ -384,10 +384,10 @@ public class EventBetterTests
             throw;
         }
 
-        Assert.AreEqual(expectedResult, EventBetter.RaiseImmediate(new DummyMessage()));
+        Assert.AreEqual(expectedResult, EventBetter.Raise(new DummyMessage()));
 
         UnityEngine.Object.DestroyImmediate(go);
-        Assert.IsFalse(EventBetter.RaiseImmediate(new DummyMessage()));
+        Assert.IsFalse(EventBetter.Raise(new DummyMessage()));
     }
 
     [SetUp]
@@ -403,20 +403,20 @@ public class EventBetterTests
         var disp1 = EventBetter.RegisterManual((DummyMessage msg) => someValue++);
         var disp2 = EventBetter.RegisterManual((DummyMessage msg) => someValue++);
 
-        Assert.AreEqual(true, EventBetter.RaiseImmediate(new DummyMessage()));
+        Assert.AreEqual(true, EventBetter.Raise(new DummyMessage()));
         Assert.AreEqual(668, someValue);
 
         disp1.Dispose();
-        Assert.AreEqual(true, EventBetter.RaiseImmediate(new DummyMessage()));
+        Assert.AreEqual(true, EventBetter.Raise(new DummyMessage()));
         Assert.AreEqual(669, someValue);
 
         // whether double dispose breaks anything
         disp1.Dispose();
-        Assert.AreEqual(true, EventBetter.RaiseImmediate(new DummyMessage()));
+        Assert.AreEqual(true, EventBetter.Raise(new DummyMessage()));
         Assert.AreEqual(670, someValue);
 
         disp2.Dispose();
-        Assert.AreEqual(false, EventBetter.RaiseImmediate(new DummyMessage()));
+        Assert.AreEqual(false, EventBetter.Raise(new DummyMessage()));
         Assert.AreEqual(670, someValue);
     }
 
