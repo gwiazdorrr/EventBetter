@@ -9,38 +9,24 @@ using UnityEngine;
 
 public static partial class EventBetter
 {
-    private class ManualHandlerDisposable : IDisposable
-    {
-        public Type MessageType { get; set; }
-        public Delegate Handler { get; set; }
-        public void Dispose()
-        {
-            if (Handler == null)
-                return;
-
-            try
-            {
-                EventBetter.UnregisterInternal(MessageType, Handler, (eventEntry, index, handler) => eventEntry.handlers[index] == handler);
-            }
-            finally
-            { 
-                MessageType = null;
-                Handler = null;
-            }
-        }
-    }
-  
-    private class EventEntry
-    {
-        public uint invocationCount = 0;
-        public bool needsCleanup = false;
-        public List<WeakReference> hosts = new List<WeakReference>();
-        public List<Delegate> handlers = new List<Delegate>();
-    }
-
-    private static Dictionary<Type, EventEntry> s_entries = new Dictionary<Type, EventEntry>();
-    private static object[] s_args = new object[2];
-
+    /// <summary>
+    /// Register a message handler. Doesn't store strong reference to the <paramref name="host"/>, makes sure <paramref name="handler"/>
+    /// doesn't store any strong references, making it effectively leak-free.
+    /// 
+    /// The Target of <paramref name="handler"/> may contain value types, strings and a reference to the <paramref name="host"/>, 
+    /// either explicit or implicit.
+    /// 
+    /// The <paramref name="handler"/> will be invoked every time a message of type <typeparamref name="MessageType"/> is raised,
+    /// unless <paramref name="host"/> gets destroyed or any Unregister method is called.
+    ///  
+    /// Behind the scenes, <paramref name="host"/> is stored as a weak reference. If <paramref name="handler"/> contains <paramref name="host"/>
+    /// reference, this reference is removed. 
+    /// </summary>
+    /// <typeparam name="HostType"></typeparam>
+    /// <typeparam name="MessageType"></typeparam>
+    /// <param name="host"></param>
+    /// <param name="handler"></param>
+    /// <exception cref="System.InvalidOperationException">Thrown if the handler as any class references other than the one to the <paramref name="host"/></exception>
     public static void Register<HostType, MessageType>(this HostType host, System.Action<MessageType> handler)
         where HostType : UnityEngine.Object
     {
@@ -89,6 +75,38 @@ public static partial class EventBetter
     {
         s_entries.Clear();
     }
+
+    private class ManualHandlerDisposable : IDisposable
+    {
+        public Type MessageType { get; set; }
+        public Delegate Handler { get; set; }
+        public void Dispose()
+        {
+            if (Handler == null)
+                return;
+
+            try
+            {
+                EventBetter.UnregisterInternal(MessageType, Handler, (eventEntry, index, handler) => eventEntry.handlers[index] == handler);
+            }
+            finally
+            {
+                MessageType = null;
+                Handler = null;
+            }
+        }
+    }
+
+    private class EventEntry
+    {
+        public uint invocationCount = 0;
+        public bool needsCleanup = false;
+        public List<WeakReference> hosts = new List<WeakReference>();
+        public List<Delegate> handlers = new List<Delegate>();
+    }
+
+    private static Dictionary<Type, EventEntry> s_entries = new Dictionary<Type, EventEntry>();
+    private static object[] s_args = new object[2];
 
 
     private static bool Raise(object message, Type messageType)
