@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using UnityEngine;
 
 /// <summary>
 /// Intentionally made partial, in case you want to extend it easily.
@@ -28,10 +29,24 @@ public static partial class EventBetter
     /// <param name="host"></param>
     /// <param name="handler"></param>
     /// <exception cref="System.InvalidOperationException">Thrown if the handler as any class references other than the one to the <paramref name="host"/></exception>
-    public static void Register<HostType, MessageType>(this HostType host, System.Action<MessageType> handler)
+    public static void Listen<HostType, MessageType>(HostType host, System.Action<MessageType> handler)
         where HostType : UnityEngine.Object
     {
         RegisterWeakifiedHandler(host, handler);
+    }
+
+    /// <summary>
+    /// Same as <see cref="Listen{HostType, MessageType}(HostType, Action{MessageType})"/>, except the handler
+    /// will only be invoked if the host is active and enabled.
+    /// </summary>
+    /// <typeparam name="HostType"></typeparam>
+    /// <typeparam name="MessageType"></typeparam>
+    /// <param name="host"></param>
+    /// <param name="handler"></param>
+    public static void ListenIfActiveAndEnabled<HostType, MessageType>(HostType host, System.Action<MessageType> handler)
+        where HostType : Behaviour
+    {
+        RegisterWeakifiedHandler(host, handler, HandlerFlags.OnlyIfActiveAndEnabled);
     }
 
     /// <summary>
@@ -41,10 +56,10 @@ public static partial class EventBetter
     /// <typeparam name="MessageType"></typeparam>
     /// <param name="handler"></param>
     /// <returns></returns>
-    public static IDisposable RegisterManual<MessageType>(System.Action<MessageType> handler)
+    public static IDisposable ListenManual<MessageType>(System.Action<MessageType> handler)
     {
         // use the dict as a host here, it will ensure the handler is going to live forever
-        var actualHandler = RegisterInternal<object, MessageType>(s_entries, (_dummy, msg) => handler(msg));
+        var actualHandler = RegisterInternal<object, MessageType>(s_entries, (_dummy, msg) => handler(msg), HandlerFlags.None);
         return new ManualHandlerDisposable()
         {
             Handler = actualHandler,
@@ -69,7 +84,7 @@ public static partial class EventBetter
     /// <typeparam name="MessageType"></typeparam>
     /// <param name="host"></param>
     /// <returns>True if there were any handlers, false otherwise.</returns>
-    public static bool Unregister<MessageType>(UnityEngine.Object host)
+    public static bool Unlisten<MessageType>(UnityEngine.Object host)
     {
         if (host == null)
             throw new ArgumentNullException("host");
@@ -82,7 +97,7 @@ public static partial class EventBetter
     /// </summary>
     /// <param name="host"></param>
     /// <returns>True if there were any handlers, false otherwise.</returns>
-    public static bool UnregisterAll(UnityEngine.Object host)
+    public static bool UnlistenAll(UnityEngine.Object host)
     {
         if (host == null)
             throw new ArgumentNullException("host");
@@ -127,20 +142,29 @@ public static partial class EventBetter
         }
     }
 
+    [Flags]
+    private enum HandlerFlags
+    {
+        None,
+        OnlyIfActiveAndEnabled = 1,
+    }
+
     private class EventEntry
     {
         public uint invocationCount = 0;
         public bool needsCleanup = false;
         public readonly List<WeakReference> hosts = new List<WeakReference>();
         public readonly List<Delegate> handlers = new List<Delegate>();
+        public readonly List<HandlerFlags> flags = new List<HandlerFlags>();
 
         public int Count => hosts.Count;
 
-        public void Add(WeakReference host, Delegate handler)
+        public void Add(WeakReference host, Delegate handler, HandlerFlags flag)
         {
             UnityEngine.Debug.Assert(hosts.Count == handlers.Count);
             hosts.Add(host);
             handlers.Add(handler);
+            flags.Add(flag);
         }
 
         public void NullifyAt(int i)
@@ -148,6 +172,7 @@ public static partial class EventBetter
             UnityEngine.Debug.Assert(hosts.Count == handlers.Count);
             hosts[i] = null;
             handlers[i] = null;
+            flags[i] = HandlerFlags.None;
         }
 
         public void RemoveAt(int i)
@@ -155,6 +180,7 @@ public static partial class EventBetter
             UnityEngine.Debug.Assert(hosts.Count == handlers.Count);
             hosts.RemoveAt(i);
             handlers.RemoveAt(i);
+            flags.RemoveAt(i);
         }
     }
 
@@ -183,6 +209,16 @@ public static partial class EventBetter
                 if (host != null)
                 {
                     var handler = entry.handlers[i];
+
+                    if ( (entry.flags[i] & HandlerFlags.OnlyIfActiveAndEnabled) == HandlerFlags.OnlyIfActiveAndEnabled )
+                    {
+                        // need to check if this is a Behaviour
+                        var behaviour = host as UnityEngine.Behaviour;
+                        if ( behaviour == null || !behaviour.isActiveAndEnabled )
+                        {
+                            continue;
+                        }
+                    }
 
                     try
                     {
@@ -230,12 +266,12 @@ public static partial class EventBetter
         return hadActiveHandlers;
     }
 
-    private static Delegate RegisterInternal<HostType, MessageType>(HostType host, System.Action<HostType, MessageType> handler)
+    private static Delegate RegisterInternal<HostType, MessageType>(HostType host, System.Action<HostType, MessageType> handler, HandlerFlags flags)
     {
-        return RegisterInternal(typeof(MessageType), host, handler);
+        return RegisterInternal(typeof(MessageType), host, handler, flags);
     }
 
-    private static Delegate RegisterInternal(Type messageType, object host, Delegate handler)
+    private static Delegate RegisterInternal(Type messageType, object host, Delegate handler, HandlerFlags flags)
     {
         if (messageType == null)
             throw new ArgumentNullException("messageType");
@@ -251,7 +287,7 @@ public static partial class EventBetter
             s_entries.Add(messageType, entry);
         }
 
-        entry.Add(new WeakReference(host), handler);
+        entry.Add(new WeakReference(host), handler, flags);
 
         return handler;
     }
@@ -292,7 +328,8 @@ public static partial class EventBetter
         return found;
     }
 
-    private static Delegate RegisterWeakifiedHandler<HostType, MessageType>(HostType host, System.Action<MessageType> handler) where HostType : class
+    private static Delegate RegisterWeakifiedHandler<HostType, MessageType>(HostType host, System.Action<MessageType> handler, HandlerFlags flags = HandlerFlags.None) 
+        where HostType : class
     {
         if (host == null)
             throw new ArgumentNullException("host");
@@ -302,7 +339,7 @@ public static partial class EventBetter
         if (handler.Target == null)
         {
             // perfect! no context!
-            return RegisterInternal<HostType, MessageType>(host, (_dummy, msg) => handler(msg));
+            return RegisterInternal<HostType, MessageType>(host, (_dummy, msg) => handler(msg), flags);
         }
         else if (handler.Target == host)
         {
@@ -310,7 +347,7 @@ public static partial class EventBetter
             var actualHandler = (System.Action<HostType, MessageType>)System.Delegate.CreateDelegate(typeof(System.Action<HostType, MessageType>), null, handler.Method, true);
 
             // inner handler is a workaround for mono not being table to dynamicaly invoke open delegates
-            return RegisterInternal<HostType, MessageType>(host, (_host, _handler) => actualHandler(_host, _handler));
+            return RegisterInternal<HostType, MessageType>(host, (_host, _handler) => actualHandler(_host, _handler), flags);
         }
         else
         {
@@ -348,7 +385,7 @@ public static partial class EventBetter
             if (thisField == null)
             {
                 // all good, all fields are "safe"
-                return RegisterInternal<HostType, MessageType>(host, (_dummy, msg) => handler(msg));
+                return RegisterInternal<HostType, MessageType>(host, (_dummy, msg) => handler(msg), flags);
             }
             else
             {
@@ -387,7 +424,7 @@ public static partial class EventBetter
                             // Debug.Assert(thisField.GetValue(target) == x);
                             thisField.SetValue(target, prevValue);
                         }
-                    });
+                    }, flags);
                 }
             }
         }
