@@ -6,6 +6,12 @@ using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 
+#if NET_4_6
+using System.Threading.Tasks;
+#endif
+
+
+
 /// <summary>
 /// Intentionally made partial, in case you want to extend it easily.
 /// </summary>
@@ -48,6 +54,7 @@ public static partial class EventBetter
     {
         RegisterWeakifiedHandler(host, handler, HandlerFlags.OnlyIfActiveAndEnabled);
     }
+
 
     /// <summary>
     /// Register a message handler. No host, you unregister by calling <see cref="IDisposable.Dispose">Dispose</see> on returned object.
@@ -119,12 +126,97 @@ public static partial class EventBetter
         s_entries.Clear();
     }
 
+    #region Coroutine Support
+
+    public static YieldListener<MessageType> ListenWait<MessageType>()
+        where MessageType : class
+    {
+        return new YieldListener<MessageType>();
+    }
+
+    public class YieldListener<MessageType> : System.Collections.IEnumerator, IDisposable
+    {
+        private Delegate handler;
+        public List<MessageType> Messages { get; private set; }
+
+        internal YieldListener()
+        {
+            handler = EventBetter.RegisterInternal<YieldListener<MessageType>, MessageType>(
+                this, (x, msg) => x.OnMessage(msg), HandlerFlags.DontInvokeIfAddedInAHandler);
+        }
+
+        public void Dispose()
+        {
+            if (handler != null)
+            {
+                EventBetter.UnlistenHandler(typeof(MessageType), handler);
+                handler = null;
+            }
+        }
+
+        private void OnMessage(MessageType msg)
+        {
+            if (Messages != null)
+            {
+                Messages = new List<MessageType>();
+            }
+            Messages.Add(msg);
+        }
+
+        bool System.Collections.IEnumerator.MoveNext()
+        {
+            if (Messages != null)
+            {
+                Dispose();
+                return false;
+            }
+            return true;
+        }
+
+        object System.Collections.IEnumerator.Current
+        {
+            get { return null; }
+        }
+
+        void System.Collections.IEnumerator.Reset()
+        {
+        }
+    }
+
+    #endregion
+
+    #region Async Support
+
+#if NET_4_6
+
+    public static async Task<MessageType> ListenAsync<MessageType>()
+    {
+        var tcs = new TaskCompletionSource<MessageType>();
+
+        var handler = RegisterInternal<object, MessageType>(s_entries,
+            (_dummy, msg) => tcs.SetResult(msg), HandlerFlags.DontInvokeIfAddedInAHandler);
+
+        try
+        {
+            return await tcs.Task;
+        }
+        finally
+        {
+            EventBetter.UnlistenHandler(typeof(MessageType), handler);
+        }
+    }
+
+#endif
+
+    #endregion
+
     #region Private
 
     private class ManualHandlerDisposable : IDisposable
     {
         public Type MessageType { get; set; }
         public Delegate Handler { get; set; }
+
         public void Dispose()
         {
             if (Handler == null)
@@ -132,7 +224,7 @@ public static partial class EventBetter
 
             try
             {
-                EventBetter.UnregisterInternal(MessageType, Handler, (eventEntry, index, handler) => eventEntry.handlers[index] == handler);
+                UnlistenHandler(MessageType, Handler);
             }
             finally
             {
@@ -145,8 +237,10 @@ public static partial class EventBetter
     [Flags]
     private enum HandlerFlags
     {
-        None,
-        OnlyIfActiveAndEnabled = 1,
+        None = 0,
+        OnlyIfActiveAndEnabled = 1 << 0,
+        Once = 1 << 1,
+        DontInvokeIfAddedInAHandler = 1 << 2,
     }
 
     private class EventEntry
@@ -159,9 +253,32 @@ public static partial class EventBetter
 
         public int Count => hosts.Count;
 
+        public bool HasFlag(int i, HandlerFlags flag)
+        {
+            return (flags[i] & flag) == flag;
+        }
+
+        public void SetFlag(int i, HandlerFlags flag, bool value)
+        {
+            if (value)
+            {
+                flags[i] |= flag;
+            }
+            else
+            {
+                flags[i] &= ~flag;
+            }
+        }
+
         public void Add(WeakReference host, Delegate handler, HandlerFlags flag)
         {
             UnityEngine.Debug.Assert(hosts.Count == handlers.Count);
+
+            // if not in a handler, don't set this flag as it would ignore first
+            // nested handler
+            if (invocationCount == 0)
+                flag &= ~HandlerFlags.DontInvokeIfAddedInAHandler;
+
             hosts.Add(host);
             handlers.Add(handler);
             flags.Add(flag);
@@ -202,15 +319,19 @@ public static partial class EventBetter
 
         try
         {
+            int initialCount = entry.Count;
+
             for (int i = 0; i < entry.Count; ++i)
             {
                 var host = GetAliveTarget(entry.hosts[i]);
 
+                bool removeHandler = true;
+
                 if (host != null)
                 {
                     var handler = entry.handlers[i];
-
-                    if ( (entry.flags[i] & HandlerFlags.OnlyIfActiveAndEnabled) == HandlerFlags.OnlyIfActiveAndEnabled )
+                    
+                    if (entry.HasFlag(i, HandlerFlags.OnlyIfActiveAndEnabled))
                     {
                         // need to check if this is a Behaviour
                         var behaviour = host as UnityEngine.Behaviour;
@@ -218,6 +339,21 @@ public static partial class EventBetter
                         {
                             continue;
                         }
+                    }
+
+                    if (i >= initialCount)
+                    {
+                        // this is a new handler; if it has a protection flag, don't call it
+                        if (entry.HasFlag(i, HandlerFlags.DontInvokeIfAddedInAHandler))
+                        {
+                            entry.SetFlag(i, HandlerFlags.DontInvokeIfAddedInAHandler, false);
+                            continue;
+                        }
+                    }
+
+                    if (!entry.HasFlag(i, HandlerFlags.Once))
+                    {
+                        removeHandler = false;
                     }
 
                     try
@@ -238,17 +374,22 @@ public static partial class EventBetter
 
                     hadActiveHandlers = true;
                 }
-                else if (invocationCount == 1)
+
+                if (removeHandler)
                 {
-                    // it's OK to compact now
-                    entry.RemoveAt(i);
-                    --i;
-                }
-                else
-                {
-                    // need to wait
-                    entry.needsCleanup = true;
-                    entry.NullifyAt(i);
+                    if (invocationCount == 1)
+                    {
+                        // it's OK to compact now
+                        entry.RemoveAt(i);
+                        --i;
+                        --initialCount;
+                    }
+                    else
+                    {
+                        // need to wait
+                        entry.needsCleanup = true;
+                        entry.NullifyAt(i);
+                    }
                 }
             }
 
@@ -290,6 +431,11 @@ public static partial class EventBetter
         entry.Add(new WeakReference(host), handler, flags);
 
         return handler;
+    }
+
+    private static bool UnlistenHandler(Type messageType, Delegate handler)
+    {
+        return EventBetter.UnregisterInternal(messageType, handler, (eventEntry, index, _handler) => eventEntry.handlers[index] == _handler);
     }
 
     private static bool UnregisterInternal<ParamType>(Type messageType, ParamType param, Func<EventEntry, int, ParamType, bool> predicate)
