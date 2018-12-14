@@ -128,6 +128,12 @@ public static partial class EventBetter
 
     #region Coroutine Support
 
+    /// <summary>
+    /// Use this in coroutines. Yield will return when at least one event of type <typeparamref name="MessageType"/>
+    /// has been raised. To get the messages
+    /// </summary>
+    /// <typeparam name="MessageType"></typeparam>
+    /// <returns></returns>
     public static YieldListener<MessageType> ListenWait<MessageType>()
         where MessageType : class
     {

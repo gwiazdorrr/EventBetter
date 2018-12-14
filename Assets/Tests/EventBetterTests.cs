@@ -38,6 +38,18 @@ public class EventBetterTests
             }
         }
 
+
+        public IEnumerator TestCoroutineCapture()
+        {
+            int count = 0;
+            yield return null;
+
+            using (EventBetter.ListenManual((TestMessage o) => InstanceHandle(++count, 1)))
+            {
+                Assert.IsTrue(EventBetter.Raise(new TestMessage()));
+            }
+        }
+
         public void TestIfActiveAndEnabled()
         {
             int count = 0;
@@ -434,6 +446,23 @@ public class EventBetterTests
         Assert.IsFalse(EventBetter.Raise(new TestMessage()));
     }
 
+    private IEnumerator CoroTest(System.Func<TestBehaviour, IEnumerator> DoStuff, bool expectedResult = true)
+    {
+        var go = new GameObject("Test", typeof(TestBehaviour));
+
+        try
+        {
+            yield return DoStuff(go.GetComponent<TestBehaviour>());
+            Assert.AreEqual(expectedResult, EventBetter.Raise(new TestMessage()));
+        }
+        finally
+        {
+            Object.DestroyImmediate(go);
+        }
+
+        Assert.IsFalse(EventBetter.Raise(new TestMessage()));
+    }
+
     [SetUp]
     public void SetUp()
     {
@@ -494,13 +523,16 @@ public class EventBetterTests
     [Test] public void NestedRaiseSimpleManual() => SimpleTest(t => t.TestNestedRaiseSimpleManual(), expectedResult: false);
     [Test] public void NestedMessedUp() => SimpleTest(t => t.TestNestedMessedUp(), expectedResult: false);
 
-    // A UnityTest behaves like a coroutine in PlayMode
-    // and allows you to yield null to skip a frame in EditMode
-    [UnityTest]
-    public IEnumerator EventBetterTestsWithEnumeratorPasses()
-    {
-        // Use the Assert class to test conditions.
-        // yield to skip a frame
-        yield return null;
-    }
+
+    [UnityTest] public IEnumerator TestCoroutineCapture() => CoroTest(b => b.TestCoroutineCapture(), expectedResult: false);
+
+    //// A UnityTest behaves like a coroutine in PlayMode
+    //// and allows you to yield null to skip a frame in EditMode
+    //[UnityTest]
+    //public IEnumerator EventBetterTestsWithEnumeratorPasses()
+    //{
+    //    // Use the Assert class to test conditions.
+    //    // yield to skip a frame
+    //    yield return null;
+    //}
 }
