@@ -257,7 +257,10 @@ public static partial class EventBetter
         public readonly List<Delegate> handlers = new List<Delegate>();
         public readonly List<HandlerFlags> flags = new List<HandlerFlags>();
 
-        public int Count => hosts.Count;
+        public int Count
+        {
+            get { return hosts.Count; }
+        }
 
         public bool HasFlag(int i, HandlerFlags flag)
         {
@@ -522,7 +525,7 @@ public static partial class EventBetter
                     if ( thisField == null )
                         thisField = field;
                     else
-                        throw new System.InvalidOperationException($"Field {thisField.Name} is not safe to capture");
+                        throw new System.InvalidOperationException(string.Format("Field {0} is not safe to capture", thisField.Name));
                 }
                 else if (!IsSafeToImplicitlyCapture(field.FieldType))
                 {
@@ -530,7 +533,7 @@ public static partial class EventBetter
                     if (thisField == null)
                         thisField = field;
                     else
-                        throw new System.InvalidOperationException($"Field {field.Name} is not safe to capture");
+                        throw new System.InvalidOperationException(string.Format("Field {0} is not safe to capture", field.Name));
                 }
             }
 
@@ -544,7 +547,7 @@ public static partial class EventBetter
                 if (!typeof(HostType).IsSubclassOf(thisField.FieldType) && typeof(HostType) != thisField.FieldType)
                 {
                     // captured something completely unexpected, not supported!
-                    throw new System.InvalidOperationException($"Incompatible {thisField.Name} type: {typeof(HostType)} vs {thisField.FieldType}");
+                    throw new System.InvalidOperationException(string.Format("Incompatible {0} type: {1} vs {2}", thisField.Name, typeof(HostType), thisField.FieldType));
                 }
                 else
                 {
@@ -555,7 +558,7 @@ public static partial class EventBetter
                     if (thisFieldValue != null && thisFieldValue != host)
                     {
                         // why is this some other host?
-                        throw new System.InvalidOperationException($"Incomatible $this value: {host} vs {thisFieldValue}");
+                        throw new System.InvalidOperationException(string.Format("Incomatible $this value: {0} vs {1}", host, thisFieldValue));
                     }
 
                     // this gets fun... since target is some sort of compiler generated stuff, but has safe fields,
