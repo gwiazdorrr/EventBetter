@@ -19,10 +19,34 @@ class Consumer : MonoBehaviour
 {
     void Awake()
     {
-        EventBetter.Listen(this, (PrintMessage msg) => Debug.Log(msg.text, this));
+        EventBetter.Listen(this, (PrintMessage msg) => Debug.Log(msg.text, this), onlyOnce: true);
     }
 }
 ```
 
+# More examples
 
+Maybe you like async/await?
+```
+class AsyncConsumer : MonoBehaviour
+{	
+	async void Awake()
+    {
+        var msg = await EventBetter.ListenAsync<PrintMessage>();
+        Debug.Log(msg.text, this);
+    }
+}
+```
 
+Or maybe you'd rather stick with good old coroutines?
+```
+class ConsumerCoro : MonoBehaviour
+{
+    IEnumerator Start()
+    {
+        var listener = EventBetter.ListenWait<PrintMessage>();
+        yield return listener;
+        Debug.Log(listener.First.text, this);
+    }
+}
+```

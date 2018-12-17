@@ -139,9 +139,20 @@ public static partial class EventBetter
     }
 
     public class YieldListener<MessageType> : System.Collections.IEnumerator, IDisposable
+        where MessageType : class
     {
         private Delegate handler;
         public List<MessageType> Messages { get; private set; }
+
+        public MessageType First
+        {
+            get
+            {
+                if (Messages == null || Messages.Count == 0)
+                    return null;
+                return Messages[0];
+            }
+        }
 
         internal YieldListener()
         {
@@ -160,7 +171,7 @@ public static partial class EventBetter
 
         private void OnMessage(MessageType msg)
         {
-            if (Messages != null)
+            if (Messages == null)
             {
                 Messages = new List<MessageType>();
             }
