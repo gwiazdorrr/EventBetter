@@ -72,8 +72,7 @@ public class EventBetterTests
             Assert.IsFalse(EventBetter.Raise(new TestMessage()));
             Assert.AreEqual(3, count);
 
-
-            EventBetter.ListenIfActiveAndEnabled(this, (TestMessage o) => ++count);
+            EventBetter.Listen(this, (TestMessage o) => ++count, onlyIfActiveAndEnabled: true);
             Assert.IsTrue(EventBetter.Raise(new TestMessage()));
             Assert.AreEqual(4, count);
 

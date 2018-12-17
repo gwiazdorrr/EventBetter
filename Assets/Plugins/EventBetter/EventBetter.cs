@@ -34,27 +34,24 @@ public static partial class EventBetter
     /// <typeparam name="MessageType"></typeparam>
     /// <param name="host"></param>
     /// <param name="handler"></param>
+    /// <param name="onlyOnce">After the <paramref name="handler"/> is invoked - unlisten automatically.</param>
+    /// <param name="onlyIfActiveAndEnabled">If <paramref name="host"/> is a Behaviour or GameObject, will only invoke <paramref name="handler"/>
+    /// if <paramref name="host"/> is ative and enabled.</param>
     /// <exception cref="System.InvalidOperationException">Thrown if the handler as any class references other than the one to the <paramref name="host"/></exception>
-    public static void Listen<HostType, MessageType>(HostType host, System.Action<MessageType> handler)
+    public static void Listen<HostType, MessageType>(HostType host, System.Action<MessageType> handler,
+        bool onlyOnce = false,
+        bool onlyIfActiveAndEnabled = false)
         where HostType : UnityEngine.Object
     {
-        RegisterWeakifiedHandler(host, handler);
-    }
+        HandlerFlags flags = HandlerFlags.None;
 
-    /// <summary>
-    /// Same as <see cref="Listen{HostType, MessageType}(HostType, Action{MessageType})"/>, except the handler
-    /// will only be invoked if the host is active and enabled.
-    /// </summary>
-    /// <typeparam name="HostType"></typeparam>
-    /// <typeparam name="MessageType"></typeparam>
-    /// <param name="host"></param>
-    /// <param name="handler"></param>
-    public static void ListenIfActiveAndEnabled<HostType, MessageType>(HostType host, System.Action<MessageType> handler)
-        where HostType : Behaviour
-    {
-        RegisterWeakifiedHandler(host, handler, HandlerFlags.OnlyIfActiveAndEnabled);
-    }
+        if (onlyOnce)
+            flags |= HandlerFlags.Once;
+        if (onlyIfActiveAndEnabled)
+            flags |= HandlerFlags.OnlyIfActiveAndEnabled;
 
+        RegisterWeakifiedHandler(host, handler, flags);
+    }
 
     /// <summary>
     /// Register a message handler. No host, you unregister by calling <see cref="IDisposable.Dispose">Dispose</see> on returned object.
@@ -349,15 +346,20 @@ public static partial class EventBetter
 
                 if (host != null)
                 {
-                    var handler = entry.handlers[i];
-                    
                     if (entry.HasFlag(i, HandlerFlags.OnlyIfActiveAndEnabled))
                     {
-                        // need to check if this is a Behaviour
                         var behaviour = host as UnityEngine.Behaviour;
-                        if ( behaviour == null || !behaviour.isActiveAndEnabled )
+                        if (!ReferenceEquals(behaviour, null))
                         {
-                            continue;
+                            if (!behaviour.isActiveAndEnabled)
+                                continue;
+                        }
+
+                        var go = host as GameObject;
+                        if (!ReferenceEquals(go, null))
+                        {
+                            if (!go.activeInHierarchy)
+                                continue;
                         }
                     }
 
@@ -385,7 +387,7 @@ public static partial class EventBetter
                         // https://github.com/Microsoft/referencesource/blob/60a4f8b853f60a424e36c7bf60f9b5b5f1973ed1/mscorlib/system/reflection/methodbase.cs#L338
                         args[0] = host;
                         args[1] = message;
-                        handler.DynamicInvoke(args);
+                        entry.handlers[i].DynamicInvoke(args);
                     }
                     finally
                     {
@@ -413,7 +415,7 @@ public static partial class EventBetter
                 }
             }
 
-            if (invocationCount == 1 && entry.needsCleanup )
+            if (invocationCount == 1 && entry.needsCleanup)
             {
                 CleanUpEntry(entry);
             }
@@ -479,7 +481,7 @@ public static partial class EventBetter
             if (entry.hosts[i] == null)
                 continue;
 
-            if (!predicate(entry, i, param))
+            if (predicate != null && !predicate(entry, i, param))
                 continue;
 
             found = true;
@@ -500,7 +502,7 @@ public static partial class EventBetter
         return found;
     }
 
-    private static Delegate RegisterWeakifiedHandler<HostType, MessageType>(HostType host, System.Action<MessageType> handler, HandlerFlags flags = HandlerFlags.None) 
+    private static Delegate RegisterWeakifiedHandler<HostType, MessageType>(HostType host, System.Action<MessageType> handler, HandlerFlags flags = HandlerFlags.None)
         where HostType : class
     {
         if (host == null)
@@ -539,7 +541,7 @@ public static partial class EventBetter
             {
                 if (field.Name == "$this")
                 {
-                    if ( thisField == null )
+                    if (thisField == null)
                         thisField = field;
                     else
                         throw new System.InvalidOperationException(string.Format("Field {0} is not safe to capture", thisField.Name));
@@ -650,7 +652,10 @@ public static partial class EventBetter
             if (GetAliveTarget(entry.hosts[i]) != null)
                 continue;
 
-            entry.NullifyAt(i);
+            if (entry.invocationCount == 0)
+                entry.RemoveAt(i--);
+            else
+                entry.NullifyAt(i);
         }
     }
 
