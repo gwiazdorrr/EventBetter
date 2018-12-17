@@ -110,9 +110,9 @@ public static partial class EventBetter
             throw new ArgumentNullException("host");
 
         bool anyListeners = false;
-        foreach (var kv in s_entries)
+        foreach (var entry in s_entriesList)
         {
-            anyListeners |= UnregisterInternal(kv.Key, host, (eventEntry, index, referenceHost) => object.ReferenceEquals(eventEntry.hosts[index].Target, referenceHost));
+            anyListeners |= UnregisterInternal(entry, host, (eventEntry, index, referenceHost) => object.ReferenceEquals(eventEntry.hosts[index].Target, referenceHost));
         }
 
         return anyListeners;
@@ -124,6 +124,7 @@ public static partial class EventBetter
     public static void Clear()
     {
         s_entries.Clear();
+        s_entriesList.Clear();
     }
 
     #region Coroutine Support
@@ -310,7 +311,17 @@ public static partial class EventBetter
         }
     }
 
+    /// <summary>
+    /// For lookups.
+    /// </summary>
     private static Dictionary<Type, EventEntry> s_entries = new Dictionary<Type, EventEntry>();
+    /// <summary>
+    /// For iterating without allocation.
+    /// </summary>
+    private static List<EventEntry> s_entriesList = new List<EventEntry>();
+    /// <summary>
+    /// To avoid allocs when raising.
+    /// </summary>
     private static object[] s_args = new object[2];
 
 
@@ -435,6 +446,7 @@ public static partial class EventBetter
         {
             entry = new EventEntry();
             s_entries.Add(messageType, entry);
+            s_entriesList.Add(entry);
         }
 
         entry.Add(new WeakReference(host), handler, flags);
@@ -455,9 +467,14 @@ public static partial class EventBetter
             return false;
         }
 
+        return UnregisterInternal(entry, param, predicate);
+    }
+
+    private static bool UnregisterInternal<ParamType>(EventEntry entry, ParamType param, Func<EventEntry, int, ParamType, bool> predicate)
+    {
         bool found = false;
 
-        for ( int i = 0; i < entry.Count; ++i )
+        for (int i = 0; i < entry.Count; ++i)
         {
             if (entry.hosts[i] == null)
                 continue;
