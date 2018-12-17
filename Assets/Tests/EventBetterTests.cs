@@ -6,6 +6,7 @@ using System.Collections;
 using InvalidOperationException = System.InvalidOperationException;
 using System.Collections.Generic;
 using UnityEngine.EventSystems;
+using System.Runtime.CompilerServices;
 
 public class EventBetterTests
 {
@@ -41,13 +42,61 @@ public class EventBetterTests
 
         public IEnumerator TestCoroutineCapture()
         {
-            int count = 0;
-            yield return null;
-
-            using (EventBetter.ListenManual((TestMessage o) => InstanceHandle(++count, 1)))
             {
-                Assert.IsTrue(EventBetter.Raise(new TestMessage()));
+                // if nothing is captured - works
+                yield return null;
+                EventBetter.Listen(this, (TestMessage msg) => { });
+                Assert.IsTrue(EventBetter.UnlistenAll(this));
             }
+
+            {
+                // if nothing is captured - works
+                int count = 0;
+                yield return null;
+                using (var listener = EventBetter.ListenManual((TestMessage msg) => InstanceHandle(++count, 1)))
+                {
+                    Assert.IsTrue(EventBetter.Raise(new TestMessage()));
+                    Assert.AreEqual(1, count);
+                }
+                Assert.IsFalse(EventBetter.Raise(new TestMessage()));
+                Assert.AreEqual(1, count);
+            }
+
+            {
+                // if local coroutine variables captured - won't
+                int count = 0;
+                yield return null;
+                Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(this, (TestMessage msg) => InstanceHandle(++count, 1)));
+            }
+        }
+
+        public IEnumerator TestListenWait()
+        {
+            using (var listener = EventBetter.ListenWait<TestMessage>())
+            {
+                Assert.IsNull(listener.Messages);
+                Assert.IsNull(listener.First);
+
+                StartCoroutine(WaitAndThen(() =>
+                {
+                    Assert.IsTrue(EventBetter.Raise(new TestMessage()));
+                    Assert.IsTrue(EventBetter.Raise(new TestMessage()));
+                }));
+
+                yield return listener;
+
+                Assert.AreEqual(2, listener.Messages.Count);
+                Assert.IsNotNull(listener.First);
+                Assert.AreEqual(listener.First, listener.Messages[0]);
+
+                Assert.IsFalse(EventBetter.Raise(new TestMessage()));
+            }
+        }
+
+        public IEnumerator WaitAndThen(System.Action action)
+        {
+            yield return new WaitForSeconds(0.1f);
+            action();
         }
 
         public void TestIfActiveAndEnabled()
@@ -109,6 +158,9 @@ public class EventBetterTests
                 startValue += 10;
                 EventBetter.Listen(this, (TestMessage o) => InstanceHandle(startValue, 210));
             }
+
+            Assert.IsTrue(EventBetter.Raise(new TestMessage()));
+            Assert.IsTrue(EventBetter.UnlistenAll(this));
         }
 
         public void TestSelf()
@@ -425,41 +477,61 @@ public class EventBetterTests
         }
     }
 
-    private void SimpleTest(System.Action<TestBehaviour> doStuff, bool expectedResult = true)
+    private static void Collect()
     {
-        var go = new GameObject("Test", typeof(TestBehaviour));
-
-        try
-        {
-            doStuff(go.GetComponent<TestBehaviour>());
-        }
-        catch
-        {
-            Object.DestroyImmediate(go);
-            throw;
-        }
-
-        Assert.AreEqual(expectedResult, EventBetter.Raise(new TestMessage()));
-
-        UnityEngine.Object.DestroyImmediate(go);
-        Assert.IsFalse(EventBetter.Raise(new TestMessage()));
+        System.GC.Collect();
+        System.GC.WaitForPendingFinalizers();
     }
 
-    private IEnumerator CoroTest(System.Func<TestBehaviour, IEnumerator> DoStuff, bool expectedResult = true)
+    private IEnumerator SimpleTest(System.Action<TestBehaviour> doStuff, bool expectedResult = true, bool collect = true)
+    {
+        return CoroTest(tb =>
+        {
+            doStuff(tb);
+            return null;
+        }, expectedResult, collect);
+    }
+
+    private IEnumerator CoroTest(System.Func<TestBehaviour, object> doStuff, bool expectedResult = true, bool collect = true)
     {
         var go = new GameObject("Test", typeof(TestBehaviour));
+        var comp = go.GetComponent<TestBehaviour>();
 
         try
         {
-            yield return DoStuff(go.GetComponent<TestBehaviour>());
+            var result = doStuff(comp);
+            if (result != null)
+                yield return result;
             Assert.AreEqual(expectedResult, EventBetter.Raise(new TestMessage()));
+            if (collect)
+            {
+                Collect();
+                Assert.AreEqual(expectedResult, EventBetter.Raise(new TestMessage()));
+            }
         }
         finally
         {
-            Object.DestroyImmediate(go);
+            Object.DestroyImmediate(comp, true);
+            Object.DestroyImmediate(go, true);
         }
 
+        // after the destroy there should be no receivers
         Assert.IsFalse(EventBetter.Raise(new TestMessage()));
+
+        if (collect)
+        {
+            var weak = new System.WeakReference(comp);
+            Assert.IsTrue(weak.IsAlive);
+            go = null;
+            comp = null;
+
+            for (int i = 0; i < 10; ++i)
+            {
+                yield return null;
+                Collect();
+            }
+            Assert.IsFalse(weak.IsAlive);
+        }
     }
 
     [SetUp]
@@ -468,7 +540,14 @@ public class EventBetterTests
         EventBetter.Clear();
     }
 
-    [Test] public void RegisterManual()
+    [TearDown]
+    public void TearDown()
+    {
+        Assert.IsFalse(EventBetter.Test_IsLeaking);
+    }
+
+    [Test]
+    public void RegisterManual()
     {
         int someValue = 666;
 
@@ -492,46 +571,150 @@ public class EventBetterTests
         Assert.AreEqual(670, someValue);
     }
 
-    [Test] public void IfActiveAndEnabled() => SimpleTest(t => t.TestIfActiveAndEnabled());
+    [UnityTest] public IEnumerator IfActiveAndEnabled() => SimpleTest(t => t.TestIfActiveAndEnabled());
 
-    [Test] public void Self() => SimpleTest(t => t.TestSelf());
-    [Test] public void SelfAdv() => SimpleTest(t => t.TestSelfAdv());
-    [Test] public void MutableLambda() => SimpleTest(t => t.TestMutableLambda());
-    [Test] public void SelfStatic() => SimpleTest(t => t.TestSelfStatic());
-    [Test] public void CaptureStruct() => SimpleTest(t => t.TestStruct());
-    [Test] public void CaptureStructStatic() => SimpleTest(t => t.TestStructStatic());
-    [Test] public void SomeOtherHost() => SimpleTest(t => t.TestSomeOtherHost());
-    [Test] public void Unregister() => SimpleTest(t => t.TestUnregister(), expectedResult: false);
+    [UnityTest] public IEnumerator Self() => SimpleTest(t => t.TestSelf());
+    [UnityTest] public IEnumerator SelfAdv() => SimpleTest(t => t.TestSelfAdv());
+    [UnityTest] public IEnumerator MutableLambda() => SimpleTest(t => t.TestMutableLambda(), expectedResult: false);
+    [UnityTest] public IEnumerator SelfStatic() => SimpleTest(t => t.TestSelfStatic());
+    [UnityTest] public IEnumerator CaptureStruct() => SimpleTest(t => t.TestStruct());
+    [UnityTest] public IEnumerator CaptureStructStatic() => SimpleTest(t => t.TestStructStatic());
+    [UnityTest] public IEnumerator SomeOtherHost() => SimpleTest(t => t.TestSomeOtherHost());
+    [UnityTest] public IEnumerator Unregister() => SimpleTest(t => t.TestUnregister(), expectedResult: false);
 
-    [Test] public void Destroy() => SimpleTest(t =>
+    [UnityTest]
+    public IEnumerator Destroy() => SimpleTest(t =>
     {
         t.TestSelf();
         Object.DestroyImmediate(t);
     }, expectedResult: false);
 
-    [Test] public void NoCallbacks() => SimpleTest(t => { }, expectedResult: false);
+    [UnityTest] public IEnumerator NoCallbacks() => SimpleTest(t => { }, expectedResult: false);
 
-    [Test] public void CaptureClass() => SimpleTest(t => t.TestClass(), expectedResult: false);
-    [Test] public void CaptureClassStatic() => SimpleTest(t => t.TestClassStatic());
-
-
-    [Test] public void NestedRegisterSimple() => SimpleTest(t => t.TestNestedRegisterSimple());
-    [Test] public void NestedRegisterSimpleManual() => SimpleTest(t => t.TestNestedRegisterSimpleManual(), expectedResult: false);
-    [Test] public void NestedRaiseSimple() => SimpleTest(t => t.TestNestedRaiseSimple());
-    [Test] public void NestedRaiseContexts() => SimpleTest(t => t.TestNestedRaiseContexts());
-    [Test] public void NestedRaiseSimpleManual() => SimpleTest(t => t.TestNestedRaiseSimpleManual(), expectedResult: false);
-    [Test] public void NestedMessedUp() => SimpleTest(t => t.TestNestedMessedUp(), expectedResult: false);
+    [UnityTest] public IEnumerator CaptureClass() => SimpleTest(t => t.TestClass(), expectedResult: false);
+    [UnityTest] public IEnumerator CaptureClassStatic() => SimpleTest(t => t.TestClassStatic());
 
 
-    [UnityTest] public IEnumerator TestCoroutineCapture() => CoroTest(b => b.TestCoroutineCapture(), expectedResult: false);
+    [UnityTest] public IEnumerator NestedRegisterSimple() => SimpleTest(t => t.TestNestedRegisterSimple());
+    [UnityTest] public IEnumerator NestedRegisterSimpleManual() => SimpleTest(t => t.TestNestedRegisterSimpleManual(), expectedResult: false);
+    [UnityTest] public IEnumerator NestedRaiseSimple() => SimpleTest(t => t.TestNestedRaiseSimple());
+    [UnityTest] public IEnumerator NestedRaiseContexts() => SimpleTest(t => t.TestNestedRaiseContexts());
+    [UnityTest] public IEnumerator NestedRaiseSimpleManual() => SimpleTest(t => t.TestNestedRaiseSimpleManual(), expectedResult: false);
+    [UnityTest] public IEnumerator NestedMessedUp() => SimpleTest(t => t.TestNestedMessedUp(), expectedResult: false);
 
-    //// A UnityTest behaves like a coroutine in PlayMode
-    //// and allows you to yield null to skip a frame in EditMode
-    //[UnityTest]
-    //public IEnumerator EventBetterTestsWithEnumeratorPasses()
-    //{
-    //    // Use the Assert class to test conditions.
-    //    // yield to skip a frame
-    //    yield return null;
-    //}
+
+    [UnityTest] public IEnumerator CaptureInCoroutine() => CoroTest(b => b.TestCoroutineCapture(), expectedResult: false);
+    [UnityTest] public IEnumerator ListenWait() => CoroTest(b => b.TestListenWait(), expectedResult: false);
+
+    #region GC Tests
+
+    [UnityTest]
+    public IEnumerator GCCollectGameObjects()
+    {
+        System.WeakReference weak;
+        {
+            var other = new GameObject();
+            weak = new System.WeakReference(other);
+            GameObject.DestroyImmediate(other);
+            Assert.IsTrue(weak.IsAlive);
+        }
+
+        Collect();
+
+        // GC.Collect will only collect if run at least a frame after an object has been destroyed
+        for (int i = 0; i < 10; ++i)
+        {
+            yield return null;
+            Assert.IsTrue(weak.IsAlive);
+        }
+
+        Collect();
+        Assert.IsFalse(weak.IsAlive);
+    }
+
+    [UnityTest]
+    public IEnumerator GCConditinalWeakTableBroken()
+    {
+        object a = new object();
+        object b = new object();
+
+        ConditionalWeakTable<object, object> cwt = new ConditionalWeakTable<object, object>();
+        cwt.Add(a, b);
+
+        var wa = new System.WeakReference(a);
+        var wb = new System.WeakReference(b);
+
+        Assert.IsTrue(wa.IsAlive);
+        Assert.IsTrue(wb.IsAlive);
+
+        yield return null;
+        Collect();
+
+        Assert.IsTrue(wa.IsAlive);
+        Assert.IsTrue(wb.IsAlive);
+
+        b = null;
+
+        for (int i = 0; i < 10; ++i)
+        {
+            yield return null;
+            Collect();
+
+            Assert.IsTrue(wa.IsAlive);
+            Assert.IsTrue(wb.IsAlive);
+        }
+
+        a = null;
+
+        for ( int i = 0; i < 10; ++i )
+        {
+            yield return null;
+            Collect();
+
+            Assert.IsTrue(wa.IsAlive, "If CWS worked, this would be false.");
+            Assert.IsTrue(wb.IsAlive, "If CWS worked, this would be false.");
+        }
+    }
+
+    [Test]
+    public void GCCollectObjects()
+    {
+        object a = new object();
+        var wa = new System.WeakReference(a);
+        Assert.IsTrue(wa.IsAlive);
+
+        Collect();
+        Assert.IsTrue(wa.IsAlive);
+
+        a = null;
+        Collect();
+        Assert.IsTrue(wa.IsAlive, "Why oh why does it not get collected?");
+    }
+
+    [UnityTest]
+    public IEnumerator GCCollectObjectsCoro()
+    {
+        object a = new object();
+        var wa = new System.WeakReference(a);
+        Assert.IsTrue(wa.IsAlive);
+  
+        Collect();
+        Assert.IsTrue(wa.IsAlive);
+
+        a = null;
+        Collect();
+
+        // GC.Collect will only collect if run at least a frame after an object has been destroyed
+        for (int i = 0; i < 10; ++i)
+        {
+            yield return null;
+            Assert.IsTrue(wa.IsAlive, "Collect seems to need yielding to work");
+        }
+
+        yield return null;
+        Collect();
+        Assert.IsFalse(wa.IsAlive);
+    }
+
+    #endregion
 }

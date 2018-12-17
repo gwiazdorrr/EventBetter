@@ -15,9 +15,9 @@ public static partial class EventBetter
             foreach (var entry in s_entries)
             {
                 if (entry.Value.hosts.Any(x => x != null && x.IsAlive))
-                    return false;
+                    return true;
             }
-            return true;
+            return false;
         }
     }
 }
