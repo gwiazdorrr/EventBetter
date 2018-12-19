@@ -40,7 +40,8 @@ public static partial class EventBetter
     /// <exception cref="System.InvalidOperationException">Thrown if the handler as any class references other than the one to the <paramref name="host"/></exception>
     public static void Listen<HostType, MessageType>(HostType host, System.Action<MessageType> handler,
         bool onlyOnce = false,
-        bool onlyIfActiveAndEnabled = false)
+        bool onlyIfActiveAndEnabled = false,
+        bool allowLeaks = false)
         where HostType : UnityEngine.Object
     {
         HandlerFlags flags = HandlerFlags.None;
@@ -49,6 +50,8 @@ public static partial class EventBetter
             flags |= HandlerFlags.Once;
         if (onlyIfActiveAndEnabled)
             flags |= HandlerFlags.OnlyIfActiveAndEnabled;
+        if (allowLeaks)
+            flags |= HandlerFlags.AllowLeaks;
 
         RegisterWeakifiedHandler(host, handler, flags);
     }
@@ -256,6 +259,7 @@ public static partial class EventBetter
         OnlyIfActiveAndEnabled = 1 << 0,
         Once = 1 << 1,
         DontInvokeIfAddedInAHandler = 1 << 2,
+        AllowLeaks = 1 << 3,
     }
 
     private class EventEntry
@@ -552,18 +556,29 @@ public static partial class EventBetter
             {
                 if (field.Name == "$this")
                 {
-                    if (thisField == null)
-                        thisField = field;
-                    else
-                        throw new System.InvalidOperationException(string.Format("Field {0} is not safe to capture", thisField.Name));
+                    thisField = field;
+                    break;
                 }
-                else if (!IsSafeToImplicitlyCapture(field.FieldType))
+            }
+
+
+            foreach (var field in fields)
+            {
+                if (field == thisField)
+                    continue;
+
+                if (!IsSafeToImplicitlyCapture(field.FieldType))
                 {
                     // if this is the only "unsafe" let's mark it as a this, for now
                     if (thisField == null)
                         thisField = field;
                     else
-                        throw new System.InvalidOperationException(string.Format("Field {0} is not safe to capture", field.Name));
+                    {
+                        if ((flags & HandlerFlags.AllowLeaks) == HandlerFlags.AllowLeaks)
+                            break;
+                        else
+                            throw new System.InvalidOperationException(string.Format("Field {0} is not safe to capture", field.Name));
+                    }
                 }
             }
 
