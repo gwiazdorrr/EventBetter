@@ -39,7 +39,6 @@ public class EventBetterTests
             }
         }
 
-
         public IEnumerator TestCoroutineCapture()
         {
             {
@@ -501,7 +500,10 @@ public class EventBetterTests
         {
             var result = doStuff(comp);
             if (result != null)
+            {
                 yield return result;
+                result = null;
+            }
             Assert.AreEqual(expectedResult, EventBetter.Raise(new TestMessage()));
             if (collect)
             {
@@ -530,7 +532,7 @@ public class EventBetterTests
                 yield return null;
                 Collect();
             }
-            Assert.IsFalse(weak.IsAlive);
+            Assert.IsFalse(weak.IsAlive, "So we have a leak...");
         }
     }
 
@@ -602,9 +604,8 @@ public class EventBetterTests
     [UnityTest] public IEnumerator NestedRaiseSimpleManual() => SimpleTest(t => t.TestNestedRaiseSimpleManual(), expectedResult: false);
     [UnityTest] public IEnumerator NestedMessedUp() => SimpleTest(t => t.TestNestedMessedUp(), expectedResult: false);
 
-
-    [UnityTest] public IEnumerator CaptureInCoroutine() => CoroTest(b => b.TestCoroutineCapture(), expectedResult: false);
-    [UnityTest] public IEnumerator ListenWait() => CoroTest(b => b.TestListenWait(), expectedResult: false);
+    [UnityTest] public IEnumerator CoroCaptureTest() => CoroTest(b => b.TestCoroutineCapture(), expectedResult: false);
+    [UnityTest] public IEnumerator CoroListenWait() => CoroTest(b => b.TestListenWait(), expectedResult: false);
 
     #region GC Tests
 
