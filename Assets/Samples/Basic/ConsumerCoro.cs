@@ -3,7 +3,12 @@ using UnityEngine;
 
 class ConsumerCoro : MonoBehaviour
 {
-    IEnumerator Start()
+    private void Awake()
+    {
+        StartCoroutine(Coro());
+    }
+    
+    private IEnumerator Coro()
     {
         var listener = EventBetter.ListenWait<PrintMessage>();
         yield return listener;

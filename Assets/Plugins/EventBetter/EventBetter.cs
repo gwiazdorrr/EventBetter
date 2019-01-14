@@ -34,24 +34,24 @@ public static partial class EventBetter
     /// <typeparam name="MessageType"></typeparam>
     /// <param name="host"></param>
     /// <param name="handler"></param>
-    /// <param name="onlyOnce">After the <paramref name="handler"/> is invoked - unlisten automatically.</param>
-    /// <param name="onlyIfActiveAndEnabled">If <paramref name="host"/> is a Behaviour or GameObject, will only invoke <paramref name="handler"/>
+    /// <param name="once">After the <paramref name="handler"/> is invoked - unlisten automatically.</param>
+    /// <param name="exculdeInactive">If <paramref name="host"/> is a Behaviour or GameObject, will only invoke <paramref name="handler"/>
     /// if <paramref name="host"/> is ative and enabled.</param>
     /// <exception cref="System.InvalidOperationException">Thrown if the handler as any class references other than the one to the <paramref name="host"/></exception>
     public static void Listen<HostType, MessageType>(HostType host, System.Action<MessageType> handler,
-        bool onlyOnce = false,
-        bool onlyIfActiveAndEnabled = false,
-        bool allowLeaks = false)
+        bool once = false,
+        bool exculdeInactive = false,
+        bool allowReferences = false)
         where HostType : UnityEngine.Object
     {
         HandlerFlags flags = HandlerFlags.None;
 
-        if (onlyOnce)
+        if (once)
             flags |= HandlerFlags.Once;
-        if (onlyIfActiveAndEnabled)
+        if (exculdeInactive)
             flags |= HandlerFlags.OnlyIfActiveAndEnabled;
-        if (allowLeaks)
-            flags |= HandlerFlags.AllowLeaks;
+        if (allowReferences)
+            flags |= HandlerFlags.AllowReferences;
 
         RegisterWeakifiedHandler(host, handler, flags);
     }
@@ -259,7 +259,7 @@ public static partial class EventBetter
         OnlyIfActiveAndEnabled = 1 << 0,
         Once = 1 << 1,
         DontInvokeIfAddedInAHandler = 1 << 2,
-        AllowLeaks = 1 << 3,
+        AllowReferences = 1 << 3,
     }
 
     private class EventEntry
@@ -552,16 +552,23 @@ public static partial class EventBetter
             var fields = targetType.GetFields(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             FieldInfo thisField = null;
 
+            // first, look for implicit this capture
             foreach (var field in fields)
             {
                 if (field.Name == "$this")
                 {
+                    if (!typeof(HostType).IsSubclassOf(field.FieldType) && typeof(HostType) != field.FieldType)
+                    {
+                        // captured something completely unexpected, not supported!
+                        throw new System.InvalidOperationException(string.Format("Incompatible {0} type: {1} vs {2}", field.Name, typeof(HostType), field.FieldType));
+                    }
+
                     thisField = field;
                     break;
                 }
             }
-
-
+    
+            // now check all if all other fields are suitable
             foreach (var field in fields)
             {
                 if (field == thisField)
@@ -569,16 +576,10 @@ public static partial class EventBetter
 
                 if (!IsSafeToImplicitlyCapture(field.FieldType))
                 {
-                    // if this is the only "unsafe" let's mark it as a this, for now
-                    if (thisField == null)
-                        thisField = field;
+                    if ((flags & HandlerFlags.AllowReferences) == HandlerFlags.AllowReferences)
+                        break;
                     else
-                    {
-                        if ((flags & HandlerFlags.AllowLeaks) == HandlerFlags.AllowLeaks)
-                            break;
-                        else
-                            throw new System.InvalidOperationException(string.Format("Field {0} is not safe to capture", field.Name));
-                    }
+                        throw new System.InvalidOperationException(string.Format("Field {0} is not safe to capture", field.Name));
                 }
             }
 
@@ -589,43 +590,34 @@ public static partial class EventBetter
             }
             else
             {
-                if (!typeof(HostType).IsSubclassOf(thisField.FieldType) && typeof(HostType) != thisField.FieldType)
+                var thisFieldValue = thisField.GetValue(target);
+                // the null check is here in case we have already nullified for this target (happens if
+                // multiple event better registrations happen is same scope)
+                if (thisFieldValue != null && thisFieldValue != host)
                 {
-                    // captured something completely unexpected, not supported!
-                    throw new System.InvalidOperationException(string.Format("Incompatible {0} type: {1} vs {2}", thisField.Name, typeof(HostType), thisField.FieldType));
+                    // why is this some other host?
+                    throw new System.InvalidOperationException(string.Format("Incomatible $this value: {0} vs {1}", host, thisFieldValue));
                 }
-                else
-                {
 
-                    var thisFieldValue = thisField.GetValue(target);
-                    // the null check is here in case we have already nullified for this target (happens if
-                    // multiple event better registrations happen is same scope)
-                    if (thisFieldValue != null && thisFieldValue != host)
+                // this gets fun... since target is some sort of compiler generated stuff, but has safe fields,
+                // EXCEPT for $this, let's nullify that field and set/unset in a handler wrapper
+                thisField.SetValue(target, null);
+                return RegisterInternal<HostType, MessageType>(host, (x, msg) =>
+                {
+                    var prevValue = thisField.GetValue(target);
+                    thisField.SetValue(target, x);
+                    try
                     {
-                        // why is this some other host?
-                        throw new System.InvalidOperationException(string.Format("Incomatible $this value: {0} vs {1}", host, thisFieldValue));
+                        handler(msg);
                     }
-
-                    // this gets fun... since target is some sort of compiler generated stuff, but has safe fields,
-                    // EXCEPT for $this, let's nullify that field and set/unset in a handler wrapper
-                    thisField.SetValue(target, null);
-                    return RegisterInternal<HostType, MessageType>(host, (x, msg) =>
+                    finally
                     {
-                        var prevValue = thisField.GetValue(target);
-                        thisField.SetValue(target, x);
-                        try
-                        {
-                            handler(msg);
-                        }
-                        finally
-                        {
-                            // can't just set it back to null since there may be nested events going on...
-                            // if nested event registers it can mess this up (the outer SetValue is the culprit)
-                            // Debug.Assert(thisField.GetValue(target) == x);
-                            thisField.SetValue(target, prevValue);
-                        }
-                    }, flags);
-                }
+                        // can't just set it back to null since there may be nested events going on...
+                        // if nested event registers it can mess this up (the outer SetValue is the culprit)
+                        // Debug.Assert(thisField.GetValue(target) == x);
+                        thisField.SetValue(target, prevValue);
+                    }
+                }, flags);
             }
         }
 

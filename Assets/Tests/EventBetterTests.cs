@@ -120,7 +120,7 @@ public class EventBetterTests
             Assert.IsFalse(EventBetter.Raise(new TestMessage()));
             Assert.AreEqual(3, count);
 
-            EventBetter.Listen(this, (TestMessage o) => ++count, onlyIfActiveAndEnabled: true);
+            EventBetter.Listen(this, (TestMessage o) => ++count, exculdeInactive: true);
             Assert.IsTrue(EventBetter.Raise(new TestMessage()));
             Assert.AreEqual(4, count);
 
@@ -220,7 +220,7 @@ public class EventBetterTests
             {
                 var go = new GameObject("blah");
                 go.transform.SetParent(transform);
-                EventBetter.Listen(go, (TestMessage o) => StaticHandle(go.name, "blah"));
+                Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(go, (TestMessage o) => StaticHandle(go.name, "blah")));
             }
 
             {
@@ -228,6 +228,56 @@ public class EventBetterTests
                 go.transform.SetParent(transform);
                 Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(go, (TestMessage o) => InstanceHandle(go.name, "blah2")));
             }
+        }
+
+        public void TestNullSideEffect()
+        {
+            {
+                // doesn't alter implicit this
+                new System.Action(() => Assert.IsNotNull(this))();
+                EventBetter.Listen(this, (TestMessage msg) => StaticHandle(0, 0));
+                new System.Action(() => Assert.IsNotNull(this))();
+            }
+
+            {
+                // doesn't alter implicit this
+                new System.Action(() => Assert.IsNotNull(this))();
+                EventBetter.Listen(this, (TestMessage msg) => InstanceHandle(0, 0));
+                new System.Action(() => Assert.IsNotNull(this))();
+            }
+
+            {
+                // alters implicit this
+                new System.Action(() => Assert.IsNotNull(this))();
+                int innerCapture = 123;
+                EventBetter.Listen(this, (TestMessage msg) => InstanceHandle(innerCapture, 123));
+                new System.Action(() => Assert.IsNull(this))();
+            }
+
+            {
+                {
+                    new System.Action(() => Assert.IsNotNull(this))();
+                    int innerCapture = 123;
+                    EventBetter.Listen(this, (TestMessage msg) => InstanceHandle(innerCapture, 123));
+                    new System.Action(() => Assert.IsNull(this))();
+                }
+                new System.Action(() => Assert.IsNotNull(this))();
+            }
+
+            {
+                int outerCapture = 123;
+
+                {
+                    // some anonymous capture mambo-jumbo
+                    int innerCapture = 123;
+                    Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(this, (TestMessage msg) => InstanceHandle(innerCapture, 123)));
+                }
+
+                EventBetter.Listen(this, (TestMessage msg) => InstanceHandle(outerCapture, 123));
+            }
+
+            new System.Action(() => Assert.IsNotNull(this))();
+            EventBetter.UnlistenAll(this);
         }
 
         public void TestUnregister()
@@ -583,6 +633,7 @@ public class EventBetterTests
     [UnityTest] public IEnumerator CaptureStructStatic() => SimpleTest(t => t.TestStructStatic());
     [UnityTest] public IEnumerator SomeOtherHost() => SimpleTest(t => t.TestSomeOtherHost());
     [UnityTest] public IEnumerator Unregister() => SimpleTest(t => t.TestUnregister(), expectedResult: false);
+    [UnityTest] public IEnumerator NullSideEffect() => SimpleTest(t => t.TestNullSideEffect(), expectedResult: false);
 
     [UnityTest]
     public IEnumerator Destroy() => SimpleTest(t =>
