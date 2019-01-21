@@ -1,38 +1,42 @@
 # EventBetter
-A Unity messaging/event system for the lazy. No interfaces to implement, no base types to derive from, no initialization, no message codes, no OnEnable/OnDisable shenanigans, no hanging references, one source file.
+A Unity messaging/event system for the lazy. No interfaces to implement, no base types to derive from, no initialization, no message codes, no OnEnable/OnDisable shenanigans, no memory leaks, no casting, one source file.
 
 # TL;DR:
 Copy [EventBetter.cs](Assets/Plugins/EventBetter/EventBetter.cs) to your project. The API you need to know is `EventBetter.Listen` and `EventBetter.Raise`. Done! Example:
 
 ```
-class PrintMessage { public string text; }
+class TextMessage
+{
+    public string text;
+}
 
 class Producer : MonoBehaviour
 {
-    void Start()
+    void Update()
     {
-        EventBetter.Raise(new PrintMessage() { text = "Hello World!" });
+        EventBetter.Raise(new TextMessage() { text = "Hello World!" });
     }
 }
 
-class Consumer : MonoBehaviour
+class ConsumerSimple : MonoBehaviour
 {
     void Awake()
     {
-        EventBetter.Listen(this, (PrintMessage msg) => Debug.Log(msg.text, this), onlyOnce: true);
+        EventBetter.Listen(this, (TextMessage msg) => Debug.Log(msg.text, this));
     }
 }
 ```
 
 # More examples
 
-Maybe you like async/await?
+Maybe you like async/await more?
+
 ```
-class AsyncConsumer : MonoBehaviour
-{	
-	async void Awake()
+class ConsumerAsync : MonoBehaviour
+{
+    async void Awake()
     {
-        var msg = await EventBetter.ListenAsync<PrintMessage>();
+        var msg = await EventBetter.ListenAsync<TextMessage>();
         Debug.Log(msg.text, this);
     }
 }
@@ -42,11 +46,38 @@ Or maybe you'd rather stick with good old coroutines?
 ```
 class ConsumerCoro : MonoBehaviour
 {
-    IEnumerator Start()
+    void Awake()
     {
-        var listener = EventBetter.ListenWait<PrintMessage>();
+        StartCoroutine(Coro());
+    }
+
+    IEnumerator Coro()
+    {
+        var listener = EventBetter.ListenWait<TextMessage>();
         yield return listener;
         Debug.Log(listener.First.text, this);
     }
 }
 ```
+
+Back to the basic Listen, maybe you want to stop listening after the first message arrives?
+```
+EventBetter.Listen(this, (TextMessage msg) => Debug.Log(msg.text, this), once: true);
+```
+
+Or listen only if the listening script is active and enabled?
+```
+EventBetter.Listen(this, (TextMessage msg) => Debug.Log(msg.text, this), exculdeInactive: true);
+```
+
+If you are not in a MonoBehaviour and still want to use EventBetter, use:
+```
+IDisposable listener = EventBetter.ListenManual( (TextMessage msg) => Debug.Log(msg.text, this) );
+// ...
+listener.Dispose();
+```
+
+# Limitations
+
+
+1. Lambdas passed to ```Listen``` are allowed to implicitly capture the host MonoBehaviour, strings and value types. Capturing reference types could lead to subtle leaks, as liftetime of such objects becomes unclear -- especially true when dealing with Unity objects. However, you can disable this limitation by using  ```allowReferences``` parameter.

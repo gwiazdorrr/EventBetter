@@ -4,10 +4,10 @@ class ConsumerNoLambda : MonoBehaviour
 {
     void Awake()
     {
-        EventBetter.Listen<ConsumerNoLambda, PrintMessage>(this, HandlePrintMessage, once: true);
+        EventBetter.Listen<ConsumerNoLambda, TextMessage>(this, HandlePrintMessage, once: true);
     }
 
-    void HandlePrintMessage(PrintMessage msg)
+    void HandlePrintMessage(TextMessage msg)
     {
         Debug.Log(msg.text, this);
     }

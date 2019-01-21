@@ -3,14 +3,14 @@ using UnityEngine;
 
 class ConsumerCoro : MonoBehaviour
 {
-    private void Awake()
+    void Awake()
     {
         StartCoroutine(Coro());
     }
-    
-    private IEnumerator Coro()
+
+    IEnumerator Coro()
     {
-        var listener = EventBetter.ListenWait<PrintMessage>();
+        var listener = EventBetter.ListenWait<TextMessage>();
         yield return listener;
         Debug.Log(listener.First.text, this);
     }
