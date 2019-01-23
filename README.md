@@ -1,8 +1,8 @@
 # EventBetter
-A Unity messaging/event system for the lazy. No interfaces to implement, no base types to derive from, no initialization, no message codes, no OnEnable/OnDisable shenanigans, no memory leaks, no casting, one source file.
+A Unity pubsub/messaging/event system for the lazy. No interfaces to implement, no base types to derive from, no initialization, no message codes, no OnEnable/OnDisable shenanigans, no memory leaks, no casting, liteweight, easy to extend, .NET3.5 compatible, one source file (everything else here is just test environment).
 
 # TL;DR:
-Copy [EventBetter.cs](Assets/Plugins/EventBetter/EventBetter.cs) to your project. The API you need to know is `EventBetter.Listen` and `EventBetter.Raise`. Done! Example:
+Copy [EventBetter.cs](Assets/Plugins/EventBetter/EventBetter.cs) anywhere to your project. The API you need to know is `EventBetter.Listen` and `EventBetter.Raise`. Done! Example:
 
 ```
 class TextMessage
@@ -76,8 +76,3 @@ IDisposable listener = EventBetter.ListenManual( (TextMessage msg) => Debug.Log(
 // ...
 listener.Dispose();
 ```
-
-# Limitations
-
-
-1. Lambdas passed to ```Listen``` are allowed to implicitly capture the host MonoBehaviour, strings and value types. Capturing reference types could lead to subtle leaks, as liftetime of such objects becomes unclear -- especially true when dealing with Unity objects. However, you can disable this limitation by using  ```allowReferences``` parameter.
