@@ -5,7 +5,6 @@ using System.Collections;
 
 using InvalidOperationException = System.InvalidOperationException;
 using System.Collections.Generic;
-using UnityEngine.EventSystems;
 using System.Runtime.CompilerServices;
 
 public class EventBetterTests
@@ -65,7 +64,9 @@ public class EventBetterTests
                 // if local coroutine variables captured - won't
                 int count = 0;
                 yield return null;
-                Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(this, (TestMessage msg) => InstanceHandle(++count, 1)));
+                EventBetter.Listen(this, (TestMessage msg) => InstanceHandle(++count, 1), once: true);
+                Assert.IsTrue(EventBetter.Raise(new TestMessage()));
+                Assert.AreEqual(1, count);
             }
         }
 
@@ -141,6 +142,63 @@ public class EventBetterTests
             Assert.AreEqual(6, count);
         }
 
+        public void TestOnce()
+        {
+            {
+                int count = 0;
+                EventBetter.Listen(this, (TestMessage o) => ++count);
+                Assert.IsTrue(EventBetter.Raise(new TestMessage()));
+                Assert.IsTrue(EventBetter.Raise(new TestMessage()));
+                Assert.AreEqual(2, count);
+                Assert.IsTrue(EventBetter.UnlistenAll(this));
+            }
+            {
+                int count = 0;
+                EventBetter.Listen(this, (TestMessage o) => ++count, once: true);
+                Assert.IsTrue(EventBetter.Raise(new TestMessage()));
+                Assert.IsFalse(EventBetter.Raise(new TestMessage()));
+                Assert.AreEqual(1, count);
+                Assert.IsFalse(EventBetter.UnlistenAll(this));
+            }
+            {
+                int count = 0;
+                EventBetter.Listen(this, (TestMessage o) => ++count, once: true);
+                EventBetter.Listen(this, (TestMessage o) => ++count, once: true);
+                EventBetter.Listen(this, (TestMessage o) => ++count, once: true);
+                Assert.IsTrue(EventBetter.Raise(new TestMessage()));
+                Assert.AreEqual(3, count);
+                Assert.IsFalse(EventBetter.Raise(new TestMessage()));
+                Assert.IsFalse(EventBetter.UnlistenAll(this));
+            }
+        }
+
+        public void TestWorker()
+        {
+            var worker = GameObject.Find("EventBetterWorker");
+            Assert.IsFalse(worker);
+
+            EventBetter.Listen(this, (TestMessage o) => { });
+            worker = GameObject.Find("EventBetterWorker");
+            Assert.IsTrue(worker);
+            Assert.AreEqual(worker, EventBetter.Test_Worker?.gameObject);
+
+            worker.SetActive(false);
+            Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(this, (TestMessage o) => { }));
+            worker.SetActive(true);
+            EventBetter.Listen(this, (TestMessage o) => { });
+
+            worker.GetComponent<MonoBehaviour>().enabled = false;
+            Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(this, (TestMessage o) => { }));
+            worker.GetComponent<MonoBehaviour>().enabled = true;
+            EventBetter.Listen(this, (TestMessage o) => { });
+
+            DestroyImmediate(worker);
+            EventBetter.Listen(this, (TestMessage o) => { });
+            worker = GameObject.Find("EventBetterWorker");
+            Assert.IsTrue(worker);
+            Assert.AreEqual(worker, EventBetter.Test_Worker?.gameObject);
+        }
+
         public void TestMutableLambda()
         {
             {
@@ -202,17 +260,17 @@ public class EventBetterTests
             var someClass = new SomeClass() { Value = 456 };
 
             // this captured implicitly
-            Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(this, (TestMessage o) => InstanceHandle(null, null)));
-            Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(this, (TestMessage o) => InstanceHandle(someClass, new SomeClass() { Value = 456 })));
-            Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(this, (TestMessage o) => InstanceHandle(someClass.Value, 456)));
+            EventBetter.Listen(this, (TestMessage o) => InstanceHandle(null, null));
+            EventBetter.Listen(this, (TestMessage o) => InstanceHandle(someClass, new SomeClass() { Value = 456 }));
+            EventBetter.Listen(this, (TestMessage o) => InstanceHandle(someClass.Value, 456));
         }
 
         public void TestClassStatic()
         {
             var someClass = new SomeClass() { Value = 456 };
             EventBetter.Listen(this, (TestMessage o) => StaticHandle(null, null));
-            Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(this, (TestMessage o) => StaticHandle(someClass, new SomeClass() { Value = 456 })));
-            Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(this, (TestMessage o) => StaticHandle(someClass.Value, 456)));
+            EventBetter.Listen(this, (TestMessage o) => StaticHandle(someClass, new SomeClass() { Value = 456 }));
+            EventBetter.Listen(this, (TestMessage o) => StaticHandle(someClass.Value, 456));
         }
 
         public void TestSomeOtherHost()
@@ -220,64 +278,14 @@ public class EventBetterTests
             {
                 var go = new GameObject("blah");
                 go.transform.SetParent(transform);
-                Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(go, (TestMessage o) => StaticHandle(go.name, "blah")));
+                EventBetter.Listen(go, (TestMessage o) => StaticHandle(go.name, "blah"));
             }
 
             {
                 var go = new GameObject("blah2");
                 go.transform.SetParent(transform);
-                Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(go, (TestMessage o) => InstanceHandle(go.name, "blah2")));
+                EventBetter.Listen(go, (TestMessage o) => InstanceHandle(go.name, "blah2"));
             }
-        }
-
-        public void TestNullSideEffect()
-        {
-            {
-                // doesn't alter implicit this
-                new System.Action(() => Assert.IsNotNull(this))();
-                EventBetter.Listen(this, (TestMessage msg) => StaticHandle(0, 0));
-                new System.Action(() => Assert.IsNotNull(this))();
-            }
-
-            {
-                // doesn't alter implicit this
-                new System.Action(() => Assert.IsNotNull(this))();
-                EventBetter.Listen(this, (TestMessage msg) => InstanceHandle(0, 0));
-                new System.Action(() => Assert.IsNotNull(this))();
-            }
-
-            {
-                // alters implicit this
-                new System.Action(() => Assert.IsNotNull(this))();
-                int innerCapture = 123;
-                EventBetter.Listen(this, (TestMessage msg) => InstanceHandle(innerCapture, 123));
-                new System.Action(() => Assert.IsNull(this))();
-            }
-
-            {
-                {
-                    new System.Action(() => Assert.IsNotNull(this))();
-                    int innerCapture = 123;
-                    EventBetter.Listen(this, (TestMessage msg) => InstanceHandle(innerCapture, 123));
-                    new System.Action(() => Assert.IsNull(this))();
-                }
-                new System.Action(() => Assert.IsNotNull(this))();
-            }
-
-            {
-                int outerCapture = 123;
-
-                {
-                    // some anonymous capture mambo-jumbo
-                    int innerCapture = 123;
-                    Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(this, (TestMessage msg) => InstanceHandle(innerCapture, 123)));
-                }
-
-                EventBetter.Listen(this, (TestMessage msg) => InstanceHandle(outerCapture, 123));
-            }
-
-            new System.Action(() => Assert.IsNotNull(this))();
-            EventBetter.UnlistenAll(this);
         }
 
         public void TestUnregister()
@@ -532,16 +540,16 @@ public class EventBetterTests
         System.GC.WaitForPendingFinalizers();
     }
 
-    private IEnumerator SimpleTest(System.Action<TestBehaviour> doStuff, bool expectedResult = true, bool collect = true)
+    private IEnumerator DoTest(System.Action<TestBehaviour> doStuff, bool someHandlersRemain = true)
     {
-        return CoroTest(tb =>
+        return DoCoroTest(tb =>
         {
             doStuff(tb);
             return null;
-        }, expectedResult, collect);
+        }, someHandlersRemain);
     }
 
-    private IEnumerator CoroTest(System.Func<TestBehaviour, object> doStuff, bool expectedResult = true, bool collect = true)
+    private IEnumerator DoCoroTest(System.Func<TestBehaviour, object> doStuff, bool someHandlersRemain = true)
     {
         var go = new GameObject("Test", typeof(TestBehaviour));
         var comp = go.GetComponent<TestBehaviour>();
@@ -554,12 +562,10 @@ public class EventBetterTests
                 yield return result;
                 result = null;
             }
-            Assert.AreEqual(expectedResult, EventBetter.Raise(new TestMessage()));
-            if (collect)
-            {
-                Collect();
-                Assert.AreEqual(expectedResult, EventBetter.Raise(new TestMessage()));
-            }
+
+            Assert.AreEqual(someHandlersRemain, EventBetter.Raise(new TestMessage()));
+            Collect();
+            Assert.AreEqual(someHandlersRemain, EventBetter.Raise(new TestMessage()));
         }
         finally
         {
@@ -570,7 +576,6 @@ public class EventBetterTests
         // after the destroy there should be no receivers
         Assert.IsFalse(EventBetter.Raise(new TestMessage()));
 
-        if (collect)
         {
             var weak = new System.WeakReference(comp);
             Assert.IsTrue(weak.IsAlive);
@@ -595,7 +600,9 @@ public class EventBetterTests
     [TearDown]
     public void TearDown()
     {
-        Assert.IsFalse(EventBetter.Test_IsLeaking);
+        bool wasLeaking = EventBetter.Test_IsLeaking;
+        EventBetter.Clear();
+        Assert.IsFalse(wasLeaking);
     }
 
     [Test]
@@ -623,40 +630,41 @@ public class EventBetterTests
         Assert.AreEqual(670, someValue);
     }
 
-    [UnityTest] public IEnumerator IfActiveAndEnabled() => SimpleTest(t => t.TestIfActiveAndEnabled());
+    [UnityTest] public IEnumerator IfActiveAndEnabled() => DoTest(t => t.TestIfActiveAndEnabled());
+    [UnityTest] public IEnumerator Once() => DoTest(t => t.TestOnce(), someHandlersRemain: false);
+    [UnityTest] public IEnumerator MessingAroundWithWorker() => DoTest(t => t.TestWorker());
 
-    [UnityTest] public IEnumerator Self() => SimpleTest(t => t.TestSelf());
-    [UnityTest] public IEnumerator SelfAdv() => SimpleTest(t => t.TestSelfAdv());
-    [UnityTest] public IEnumerator MutableLambda() => SimpleTest(t => t.TestMutableLambda(), expectedResult: false);
-    [UnityTest] public IEnumerator SelfStatic() => SimpleTest(t => t.TestSelfStatic());
-    [UnityTest] public IEnumerator CaptureStruct() => SimpleTest(t => t.TestStruct());
-    [UnityTest] public IEnumerator CaptureStructStatic() => SimpleTest(t => t.TestStructStatic());
-    [UnityTest] public IEnumerator SomeOtherHost() => SimpleTest(t => t.TestSomeOtherHost());
-    [UnityTest] public IEnumerator Unregister() => SimpleTest(t => t.TestUnregister(), expectedResult: false);
-    [UnityTest] public IEnumerator NullSideEffect() => SimpleTest(t => t.TestNullSideEffect(), expectedResult: false);
+    [UnityTest] public IEnumerator Self() => DoTest(t => t.TestSelf());
+    [UnityTest] public IEnumerator SelfAdv() => DoTest(t => t.TestSelfAdv());
+    [UnityTest] public IEnumerator MutableLambda() => DoTest(t => t.TestMutableLambda(), someHandlersRemain: false);
+    [UnityTest] public IEnumerator SelfStatic() => DoTest(t => t.TestSelfStatic());
+    [UnityTest] public IEnumerator CaptureStruct() => DoTest(t => t.TestStruct());
+    [UnityTest] public IEnumerator CaptureStructStatic() => DoTest(t => t.TestStructStatic());
+    [UnityTest] public IEnumerator SomeOtherHost() => DoTest(t => t.TestSomeOtherHost());
+    [UnityTest] public IEnumerator Unregister() => DoTest(t => t.TestUnregister(), someHandlersRemain: false);
 
     [UnityTest]
-    public IEnumerator Destroy() => SimpleTest(t =>
+    public IEnumerator Destroy() => DoTest(t =>
     {
         t.TestSelf();
         Object.DestroyImmediate(t);
-    }, expectedResult: false);
+    }, someHandlersRemain: false);
 
-    [UnityTest] public IEnumerator NoCallbacks() => SimpleTest(t => { }, expectedResult: false);
+    [UnityTest] public IEnumerator NoCallbacks() => DoTest(t => { }, someHandlersRemain: false);
 
-    [UnityTest] public IEnumerator CaptureClass() => SimpleTest(t => t.TestClass(), expectedResult: false);
-    [UnityTest] public IEnumerator CaptureClassStatic() => SimpleTest(t => t.TestClassStatic());
+    [UnityTest] public IEnumerator CaptureClass() => DoTest(t => t.TestClass());
+    [UnityTest] public IEnumerator CaptureClassStatic() => DoTest(t => t.TestClassStatic());
 
 
-    [UnityTest] public IEnumerator NestedRegisterSimple() => SimpleTest(t => t.TestNestedRegisterSimple());
-    [UnityTest] public IEnumerator NestedRegisterSimpleManual() => SimpleTest(t => t.TestNestedRegisterSimpleManual(), expectedResult: false);
-    [UnityTest] public IEnumerator NestedRaiseSimple() => SimpleTest(t => t.TestNestedRaiseSimple());
-    [UnityTest] public IEnumerator NestedRaiseContexts() => SimpleTest(t => t.TestNestedRaiseContexts());
-    [UnityTest] public IEnumerator NestedRaiseSimpleManual() => SimpleTest(t => t.TestNestedRaiseSimpleManual(), expectedResult: false);
-    [UnityTest] public IEnumerator NestedMessedUp() => SimpleTest(t => t.TestNestedMessedUp(), expectedResult: false);
+    [UnityTest] public IEnumerator NestedRegisterSimple() => DoTest(t => t.TestNestedRegisterSimple());
+    [UnityTest] public IEnumerator NestedRegisterSimpleManual() => DoTest(t => t.TestNestedRegisterSimpleManual(), someHandlersRemain: false);
+    [UnityTest] public IEnumerator NestedRaiseSimple() => DoTest(t => t.TestNestedRaiseSimple());
+    [UnityTest] public IEnumerator NestedRaiseContexts() => DoTest(t => t.TestNestedRaiseContexts());
+    [UnityTest] public IEnumerator NestedRaiseSimpleManual() => DoTest(t => t.TestNestedRaiseSimpleManual(), someHandlersRemain: false);
+    [UnityTest] public IEnumerator NestedMessedUp() => DoTest(t => t.TestNestedMessedUp(), someHandlersRemain: false);
 
-    [UnityTest] public IEnumerator CoroCaptureTest() => CoroTest(b => b.TestCoroutineCapture(), expectedResult: false);
-    [UnityTest] public IEnumerator CoroListenWait() => CoroTest(b => b.TestListenWait(), expectedResult: false);
+    [UnityTest] public IEnumerator CoroCaptureTest() => DoCoroTest(b => b.TestCoroutineCapture(), someHandlersRemain: false);
+    [UnityTest] public IEnumerator CoroListenWait() => DoCoroTest(b => b.TestListenWait(), someHandlersRemain: false);
 
     #region GC Tests
 

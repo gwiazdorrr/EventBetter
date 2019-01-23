@@ -18,17 +18,10 @@ using System.Threading.Tasks;
 public static partial class EventBetter
 {
     /// <summary>
-    /// Register a message handler. Doesn't store strong reference to the <paramref name="host"/>, makes sure <paramref name="handler"/>
-    /// doesn't store any strong references, making it effectively leak-free.
-    /// 
-    /// The Target of <paramref name="handler"/> may contain value types, strings and a reference to the <paramref name="host"/>, 
-    /// either explicit or implicit.
+    /// Register a message handler.
     /// 
     /// The <paramref name="handler"/> will be invoked every time a message of type <typeparamref name="MessageType"/> is raised,
-    /// unless <paramref name="host"/> gets destroyed or any Unregister method is called.
-    ///  
-    /// Behind the scenes, <paramref name="host"/> is stored as a weak reference. If <paramref name="handler"/> contains <paramref name="host"/>
-    /// reference, this reference is removed. 
+    /// unless <paramref name="host"/> gets destroyed or one of Unlisten/Clear methods is called.
     /// </summary>
     /// <typeparam name="HostType"></typeparam>
     /// <typeparam name="MessageType"></typeparam>
@@ -36,24 +29,21 @@ public static partial class EventBetter
     /// <param name="handler"></param>
     /// <param name="once">After the <paramref name="handler"/> is invoked - unlisten automatically.</param>
     /// <param name="exculdeInactive">If <paramref name="host"/> is a Behaviour or GameObject, will only invoke <paramref name="handler"/>
-    /// if <paramref name="host"/> is ative and enabled.</param>
-    /// <exception cref="System.InvalidOperationException">Thrown if the handler as any class references other than the one to the <paramref name="host"/></exception>
+    /// if <paramref name="host"/> is active and enabled.</param>
+    /// <exception cref="System.InvalidOperationException">Thrown if the internal worker has been disabled somehow.</exception>
     public static void Listen<HostType, MessageType>(HostType host, System.Action<MessageType> handler,
         bool once = false,
-        bool exculdeInactive = false,
-        bool allowReferences = false)
+        bool exculdeInactive = false)
         where HostType : UnityEngine.Object
     {
-        HandlerFlags flags = HandlerFlags.None;
+        HandlerFlags flags = HandlerFlags.IsUnityObject;
 
         if (once)
             flags |= HandlerFlags.Once;
         if (exculdeInactive)
             flags |= HandlerFlags.OnlyIfActiveAndEnabled;
-        if (allowReferences)
-            flags |= HandlerFlags.AllowReferences;
 
-        RegisterWeakifiedHandler(host, handler, flags);
+        RegisterInternal(host, handler, flags);
     }
 
     /// <summary>
@@ -66,7 +56,7 @@ public static partial class EventBetter
     public static IDisposable ListenManual<MessageType>(System.Action<MessageType> handler)
     {
         // use the dict as a host here, it will ensure the handler is going to live forever
-        var actualHandler = RegisterInternal<object, MessageType>(s_entries, (_dummy, msg) => handler(msg), HandlerFlags.None);
+        var actualHandler = RegisterInternal<object, MessageType>(s_entries, (msg) => handler(msg), HandlerFlags.None);
         return new ManualHandlerDisposable()
         {
             Handler = actualHandler,
@@ -96,7 +86,7 @@ public static partial class EventBetter
         if (host == null)
             throw new ArgumentNullException("host");
 
-        return UnregisterInternal(typeof(MessageType), host, (eventEntry, index, referenceHost) => object.ReferenceEquals(eventEntry.hosts[index].Target, referenceHost));
+        return UnregisterInternal(typeof(MessageType), host, (eventEntry, index, referenceHost) => object.ReferenceEquals(eventEntry.hosts[index], referenceHost));
     }
 
     /// <summary>
@@ -112,7 +102,7 @@ public static partial class EventBetter
         bool anyListeners = false;
         foreach (var entry in s_entriesList)
         {
-            anyListeners |= UnregisterInternal(entry, host, (eventEntry, index, referenceHost) => object.ReferenceEquals(eventEntry.hosts[index].Target, referenceHost));
+            anyListeners |= UnregisterInternal(entry, host, (eventEntry, index, referenceHost) => object.ReferenceEquals(eventEntry.hosts[index], referenceHost));
         }
 
         return anyListeners;
@@ -125,7 +115,25 @@ public static partial class EventBetter
     {
         s_entries.Clear();
         s_entriesList.Clear();
+        if (s_worker)
+        {
+            UnityEngine.Object.Destroy(s_worker.gameObject);
+            s_worker = null;
+        }
     }
+
+    /// <summary>
+    /// Removes handlers that will now longer be called because their hosts have been destroyed. Normally
+    /// there's no reason to call that, since EventBetter does it behind the scenes in every LateUpdate.
+    /// </summary>
+    public static void RemoveUnusedHandlers()
+    {
+        foreach (var entry in s_entriesList)
+        {
+            RemoveUnusedHandlers(entry);
+        }
+    }
+
 
     #region Coroutine Support
 
@@ -160,7 +168,7 @@ public static partial class EventBetter
         internal YieldListener()
         {
             handler = EventBetter.RegisterInternal<YieldListener<MessageType>, MessageType>(
-                this, (x, msg) => x.OnMessage(msg), HandlerFlags.DontInvokeIfAddedInAHandler);
+                this, (msg) => OnMessage(msg), HandlerFlags.DontInvokeIfAddedInAHandler);
         }
 
         public void Dispose()
@@ -212,7 +220,7 @@ public static partial class EventBetter
         var tcs = new TaskCompletionSource<MessageType>();
 
         var handler = RegisterInternal<object, MessageType>(s_entries,
-            (_dummy, msg) => tcs.SetResult(msg), HandlerFlags.DontInvokeIfAddedInAHandler);
+            (msg) => tcs.SetResult(msg), HandlerFlags.DontInvokeIfAddedInAHandler);
 
         try
         {
@@ -259,14 +267,23 @@ public static partial class EventBetter
         OnlyIfActiveAndEnabled = 1 << 0,
         Once = 1 << 1,
         DontInvokeIfAddedInAHandler = 1 << 2,
-        AllowReferences = 1 << 3,
+        IsUnityObject = 1 << 3,
+    }
+
+    private sealed class EventBetterWorker : MonoBehaviour
+    {
+        private void LateUpdate()
+        {
+            Debug.Assert(this == s_worker);
+            EventBetter.RemoveUnusedHandlers();
+        }
     }
 
     private class EventEntry
     {
         public uint invocationCount = 0;
         public bool needsCleanup = false;
-        public readonly List<WeakReference> hosts = new List<WeakReference>();
+        public readonly List<object> hosts = new List<object>();
         public readonly List<Delegate> handlers = new List<Delegate>();
         public readonly List<HandlerFlags> flags = new List<HandlerFlags>();
 
@@ -292,7 +309,7 @@ public static partial class EventBetter
             }
         }
 
-        public void Add(WeakReference host, Delegate handler, HandlerFlags flag)
+        public void Add(object host, Delegate handler, HandlerFlags flag)
         {
             UnityEngine.Debug.Assert(hosts.Count == handlers.Count);
 
@@ -334,7 +351,11 @@ public static partial class EventBetter
     /// <summary>
     /// To avoid allocs when raising.
     /// </summary>
-    private static object[] s_args = new object[2];
+    private static object[] s_args = new object[1];
+    /// <summary>
+    /// 
+    /// </summary>
+    private static EventBetterWorker s_worker;
 
 
     private static bool Raise(object message, Type messageType)
@@ -400,13 +421,12 @@ public static partial class EventBetter
                         // Also, this *seems* to be safe, as DynamicInvoke eventually calls MethodBase.CheckArguments,
                         // and it copies the array
                         // https://github.com/Microsoft/referencesource/blob/60a4f8b853f60a424e36c7bf60f9b5b5f1973ed1/mscorlib/system/reflection/methodbase.cs#L338
-                        args[0] = host;
-                        args[1] = message;
+                        args[0] = message;
                         entry.handlers[i].DynamicInvoke(args);
                     }
                     finally
                     {
-                        args[0] = args[1] = null;
+                        args[0] = null;
                     }
 
                     hadActiveHandlers = true;
@@ -429,22 +449,22 @@ public static partial class EventBetter
                     }
                 }
             }
-
-            if (invocationCount == 1 && entry.needsCleanup)
-            {
-                CleanUpEntry(entry);
-            }
         }
         finally
         {
             UnityEngine.Debug.Assert(invocationCount == entry.invocationCount);
             --entry.invocationCount;
+
+            if (invocationCount == 1 && entry.needsCleanup)
+            {
+                RemoveUnusedHandlers(entry);
+            }
         }
 
         return hadActiveHandlers;
     }
 
-    private static Delegate RegisterInternal<HostType, MessageType>(HostType host, System.Action<HostType, MessageType> handler, HandlerFlags flags)
+    private static Delegate RegisterInternal<HostType, MessageType>(HostType host, System.Action<MessageType> handler, HandlerFlags flags)
     {
         return RegisterInternal(typeof(MessageType), host, handler, flags);
     }
@@ -458,6 +478,12 @@ public static partial class EventBetter
         if (handler == null)
             throw new ArgumentNullException("handler");
 
+        if ((flags & HandlerFlags.IsUnityObject) == HandlerFlags.IsUnityObject)
+        {
+            Debug.Assert(host is UnityEngine.Object);
+            EnsureWorkerExistsAndIsActive();
+        }
+
         EventEntry entry;
         if (!s_entries.TryGetValue(messageType, out entry))
         {
@@ -466,7 +492,7 @@ public static partial class EventBetter
             s_entriesList.Add(entry);
         }
 
-        entry.Add(new WeakReference(host), handler, flags);
+        entry.Add(host, handler, flags);
 
         return handler;
     }
@@ -516,140 +542,9 @@ public static partial class EventBetter
 
         return found;
     }
-
-    private static Delegate RegisterWeakifiedHandler<HostType, MessageType>(HostType host, System.Action<MessageType> handler, HandlerFlags flags = HandlerFlags.None)
-        where HostType : class
-    {
-        if (host == null)
-            throw new ArgumentNullException("host");
-        if (handler == null)
-            throw new ArgumentNullException("handler");
-
-        if (handler.Target == null)
-        {
-            // perfect! no context!
-            return RegisterInternal<HostType, MessageType>(host, (_dummy, msg) => handler(msg), flags);
-        }
-        else if (handler.Target == host)
-        {
-            // easy - fallback to the "old" ways of lazy events
-            var actualHandler = (System.Action<HostType, MessageType>)System.Delegate.CreateDelegate(typeof(System.Action<HostType, MessageType>), null, handler.Method, true);
-
-            // inner handler is a workaround for mono not being table to dynamicaly invoke open delegates
-            return RegisterInternal<HostType, MessageType>(host, (_host, _handler) => actualHandler(_host, _handler), flags);
-        }
-        else
-        {
-            // ok, it gets complicated...
-            var target = handler.Target;
-            var targetType = target.GetType();
-            var attributes = targetType.GetCustomAttributes(typeof(System.Runtime.CompilerServices.CompilerGeneratedAttribute), true);
-            if (attributes == null || attributes.Length == 0)
-            {
-                throw new System.InvalidOperationException("Does not work for non-compiler generated targets");
-            }
-
-            var fields = targetType.GetFields(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            FieldInfo thisField = null;
-
-            // first, look for implicit this capture
-            foreach (var field in fields)
-            {
-                if (field.Name == "$this")
-                {
-                    if (!typeof(HostType).IsSubclassOf(field.FieldType) && typeof(HostType) != field.FieldType)
-                    {
-                        // captured something completely unexpected, not supported!
-                        throw new System.InvalidOperationException(string.Format("Incompatible {0} type: {1} vs {2}", field.Name, typeof(HostType), field.FieldType));
-                    }
-
-                    thisField = field;
-                    break;
-                }
-            }
     
-            // now check all if all other fields are suitable
-            foreach (var field in fields)
-            {
-                if (field == thisField)
-                    continue;
-
-                if (!IsSafeToImplicitlyCapture(field.FieldType))
-                {
-                    if ((flags & HandlerFlags.AllowReferences) == HandlerFlags.AllowReferences)
-                        break;
-                    else
-                        throw new System.InvalidOperationException(string.Format("Field {0} is not safe to capture", field.Name));
-                }
-            }
-
-            if (thisField == null)
-            {
-                // all good, all fields are "safe"
-                return RegisterInternal<HostType, MessageType>(host, (_dummy, msg) => handler(msg), flags);
-            }
-            else
-            {
-                var thisFieldValue = thisField.GetValue(target);
-                // the null check is here in case we have already nullified for this target (happens if
-                // multiple event better registrations happen is same scope)
-                if (thisFieldValue != null && thisFieldValue != host)
-                {
-                    // why is this some other host?
-                    throw new System.InvalidOperationException(string.Format("Incomatible $this value: {0} vs {1}", host, thisFieldValue));
-                }
-
-                // this gets fun... since target is some sort of compiler generated stuff, but has safe fields,
-                // EXCEPT for $this, let's nullify that field and set/unset in a handler wrapper
-                thisField.SetValue(target, null);
-                return RegisterInternal<HostType, MessageType>(host, (x, msg) =>
-                {
-                    var prevValue = thisField.GetValue(target);
-                    thisField.SetValue(target, x);
-                    try
-                    {
-                        handler(msg);
-                    }
-                    finally
-                    {
-                        // can't just set it back to null since there may be nested events going on...
-                        // if nested event registers it can mess this up (the outer SetValue is the culprit)
-                        // Debug.Assert(thisField.GetValue(target) == x);
-                        thisField.SetValue(target, prevValue);
-                    }
-                }, flags);
-            }
-        }
-
-    }
-
-    private static bool IsSafeToImplicitlyCapture(System.Type type, HashSet<Type> knownValueTypes = null)
+    private static object GetAliveTarget(object target)
     {
-        if (type.IsPrimitive || type.IsEnum || type == typeof(string))
-            return true;
-
-        if (!type.IsValueType)
-        {
-            // TODO: add some attribute here because maybe some types will be suitable
-            return false;
-        }
-
-        var fields = type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-        foreach (var f in fields)
-        {
-            if (!IsSafeToImplicitlyCapture(f.FieldType, knownValueTypes))
-                return false;
-        }
-
-        return true;
-    }
-
-    private static object GetAliveTarget(WeakReference reference)
-    {
-        if (reference == null)
-            return null;
-
-        var target = reference.Target;
         if (target == null)
             return null;
 
@@ -663,18 +558,46 @@ public static partial class EventBetter
         return null;
     }
 
-    private static void CleanUpEntry(EventEntry entry)
+    private static void RemoveUnusedHandlers(EventEntry entry)
     {
         for (int i = 0; i < entry.Count; ++i)
         {
-            if (GetAliveTarget(entry.hosts[i]) != null)
-                continue;
+            var host = entry.hosts[i];
+            if (entry.HasFlag(i, HandlerFlags.IsUnityObject))
+            {
+                if ((UnityEngine.Object)host != null)
+                    continue;
+            }
+            else
+            {
+                if (host != null)
+                    continue;
+            }
 
             if (entry.invocationCount == 0)
                 entry.RemoveAt(i--);
             else
                 entry.NullifyAt(i);
         }
+    }
+
+    private static void EnsureWorkerExistsAndIsActive()
+    {
+        if (s_worker)
+        {
+            if (!s_worker.isActiveAndEnabled)
+                throw new InvalidOperationException("EventBetterWorker is disabled");
+
+            return;
+        }
+
+        var go = new GameObject("EventBetterWorker", typeof(EventBetterWorker));
+        go.hideFlags = HideFlags.HideAndDontSave;
+        GameObject.DontDestroyOnLoad(go);
+
+        s_worker = go.GetComponent<EventBetterWorker>();
+        if (!s_worker)
+            throw new InvalidOperationException("Unable to create EventBetterWorker");
     }
 
     #endregion
