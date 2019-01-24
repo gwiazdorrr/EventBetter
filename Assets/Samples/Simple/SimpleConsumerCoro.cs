@@ -1,7 +1,7 @@
 ﻿using System.Collections;
 using UnityEngine;
 
-class ConsumerCoro : MonoBehaviour
+class SimpleConsumerCoro : MonoBehaviour
 {
     void Awake()
     {

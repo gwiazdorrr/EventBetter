@@ -139,7 +139,8 @@ public static partial class EventBetter
 
     /// <summary>
     /// Use this in coroutines. Yield will return when at least one event of type <typeparamref name="MessageType"/>
-    /// has been raised. To get the messages
+    /// has been raised. To get the messages use <see cref="YieldListener{MessageType}.First"/> or 
+    /// <see cref="YieldListener{MessageType}.Messages"/>
     /// </summary>
     /// <typeparam name="MessageType"></typeparam>
     /// <returns></returns>
@@ -345,7 +346,7 @@ public static partial class EventBetter
     /// </summary>
     private static Dictionary<Type, EventEntry> s_entries = new Dictionary<Type, EventEntry>();
     /// <summary>
-    /// For iterating without allocation.
+    /// For faster iteration.
     /// </summary>
     private static List<EventEntry> s_entriesList = new List<EventEntry>();
     /// <summary>
@@ -353,7 +354,7 @@ public static partial class EventBetter
     /// </summary>
     private static object[] s_args = new object[1];
     /// <summary>
-    /// 
+    /// For removing dead handlers.
     /// </summary>
     private static EventBetterWorker s_worker;
 

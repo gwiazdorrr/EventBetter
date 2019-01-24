@@ -1,10 +1,10 @@
 ﻿using UnityEngine;
 
-class ConsumerNoLambda : MonoBehaviour
+class SimpleConsumerNoLambda : MonoBehaviour
 {
     void Awake()
     {
-        EventBetter.Listen<ConsumerNoLambda, TextMessage>(this, HandlePrintMessage, once: true);
+        EventBetter.Listen<SimpleConsumerNoLambda, TextMessage>(this, HandlePrintMessage, once: true);
     }
 
     void HandlePrintMessage(TextMessage msg)

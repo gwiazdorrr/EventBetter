@@ -1,6 +1,6 @@
 ﻿using UnityEngine;
 
-class ConsumerSimple : MonoBehaviour
+class SimpleConsumer : MonoBehaviour
 {
     void Awake()
     {

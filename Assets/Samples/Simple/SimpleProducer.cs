@@ -5,7 +5,7 @@ class TextMessage
     public string text;
 }
 
-class Producer : MonoBehaviour
+class SimpleProducer : MonoBehaviour
 {
     void Update()
     {
