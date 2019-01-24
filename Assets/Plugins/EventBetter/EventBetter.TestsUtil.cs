@@ -14,7 +14,7 @@ public static partial class EventBetter
         {
             foreach (var entry in s_entries)
             {
-                if (entry.Value.hosts.Any(x => x != null))
+                if (entry.Value.listeners.Any(x => x != null))
                     return true;
             }
             return false;

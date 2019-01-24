@@ -1,5 +1,5 @@
 # EventBetter
-A Unity pubsub/messaging/event system for the lazy. No interfaces to implement, no base types to derive from, no initialization, no message codes, no OnEnable/OnDisable shenanigans, no memory leaks, no casting, liteweight, easy to extend, .NET3.5 compatible, one source file (everything else here is just test environment).
+A Unity pubsub/messaging/event system for the lazy. No interfaces to implement, no base types to derive from, no initialization, no message codes, no OnEnable/OnDisable shenanigans, no memory leaks, no casting, liteweight, easy to extend, async/coroutine friendly, .NET3.5 compatible, one source file (everything else here is just test environment). Rasing events is alloc-free.
 
 # TL;DR:
 Copy [EventBetter.cs](Assets/Plugins/EventBetter/EventBetter.cs) anywhere to your project. The API you need to know is `EventBetter.Listen` and `EventBetter.Raise`. Done! Example:
@@ -10,7 +10,7 @@ class TextMessage
     public string text;
 }
 
-class Producer : MonoBehaviour
+class SimpleProducer : MonoBehaviour
 {
     void Update()
     {
@@ -18,7 +18,7 @@ class Producer : MonoBehaviour
     }
 }
 
-class ConsumerSimple : MonoBehaviour
+class SimpleConsumer : MonoBehaviour
 {
     void Awake()
     {
@@ -27,12 +27,20 @@ class ConsumerSimple : MonoBehaviour
 }
 ```
 
+There's no need to unlisten/unsubsribe from anything.
+
+# How does it work
+
+The first parameter in `Listen` is the listener; as long as it is alive, the handler (the second parameter) will be invoked whenever there is a `Raise` called with a matching type. If the listener gets destroyed (with Destroy or when changing scenes), the handler will not get invoked anymore and all the references will get cleaned up no later than in the next LateUpdate.
+
+It is possible thanks to UnityEngine.Object being the main citizen in the Unity world - it has a native representation with lifetime controlled entirely by the engine. There's no need to use WeakReference, ConditionalWeakTable and boilerplate like "unsubsribe" to avoid leaks, just keep track of the native parts.
+
 # More examples
 
 Maybe you like async/await more?
 
 ```
-class ConsumerAsync : MonoBehaviour
+class SimpleConsumerAsync : MonoBehaviour
 {
     async void Awake()
     {
@@ -44,7 +52,7 @@ class ConsumerAsync : MonoBehaviour
 
 Or maybe you'd rather stick with good old coroutines?
 ```
-class ConsumerCoro : MonoBehaviour
+class SimpleConsumerCoro : MonoBehaviour
 {
     void Awake()
     {
@@ -75,4 +83,4 @@ If you are not in a MonoBehaviour and still want to use EventBetter, use:
 IDisposable listener = EventBetter.ListenManual( (TextMessage msg) => Debug.Log(msg.text, this) );
 // ...
 listener.Dispose();
-```
+``` 

@@ -21,20 +21,20 @@ public static partial class EventBetter
     /// Register a message handler.
     /// 
     /// The <paramref name="handler"/> will be invoked every time a message of type <typeparamref name="MessageType"/> is raised,
-    /// unless <paramref name="host"/> gets destroyed or one of Unlisten/Clear methods is called.
+    /// unless <paramref name="listener"/> gets destroyed or one of Unlisten/Clear methods is called.
     /// </summary>
-    /// <typeparam name="HostType"></typeparam>
+    /// <typeparam name="ListenerType"></typeparam>
     /// <typeparam name="MessageType"></typeparam>
-    /// <param name="host"></param>
+    /// <param name="listener"></param>
     /// <param name="handler"></param>
     /// <param name="once">After the <paramref name="handler"/> is invoked - unlisten automatically.</param>
-    /// <param name="exculdeInactive">If <paramref name="host"/> is a Behaviour or GameObject, will only invoke <paramref name="handler"/>
-    /// if <paramref name="host"/> is active and enabled.</param>
+    /// <param name="exculdeInactive">If <paramref name="listener"/> is a Behaviour or GameObject, will only invoke <paramref name="handler"/>
+    /// if <paramref name="listener"/> is active and enabled.</param>
     /// <exception cref="System.InvalidOperationException">Thrown if the internal worker has been disabled somehow.</exception>
-    public static void Listen<HostType, MessageType>(HostType host, System.Action<MessageType> handler,
+    public static void Listen<ListenerType, MessageType>(ListenerType listener, System.Action<MessageType> handler,
         bool once = false,
         bool exculdeInactive = false)
-        where HostType : UnityEngine.Object
+        where ListenerType : UnityEngine.Object
     {
         HandlerFlags flags = HandlerFlags.IsUnityObject;
 
@@ -43,11 +43,11 @@ public static partial class EventBetter
         if (exculdeInactive)
             flags |= HandlerFlags.OnlyIfActiveAndEnabled;
 
-        RegisterInternal(host, handler, flags);
+        RegisterInternal(listener, handler, flags);
     }
 
     /// <summary>
-    /// Register a message handler. No host, you unregister by calling <see cref="IDisposable.Dispose">Dispose</see> on returned object.
+    /// Register a message handler. No listener, you unregister by calling <see cref="IDisposable.Dispose">Dispose</see> on returned object.
     /// Handler is not limited in what it is allowed to capture.
     /// </summary>
     /// <typeparam name="MessageType"></typeparam>
@@ -55,7 +55,7 @@ public static partial class EventBetter
     /// <returns></returns>
     public static IDisposable ListenManual<MessageType>(System.Action<MessageType> handler)
     {
-        // use the dict as a host here, it will ensure the handler is going to live forever
+        // use the dict as a listener here, it will ensure the handler is going to live forever
         var actualHandler = RegisterInternal<object, MessageType>(s_entries, (msg) => handler(msg), HandlerFlags.None);
         return new ManualHandlerDisposable()
         {
@@ -76,33 +76,33 @@ public static partial class EventBetter
     }
 
     /// <summary>
-    /// Unregisters all <typeparamref name="MessageType"/> handlers for a given host.
+    /// Unregisters all <typeparamref name="MessageType"/> handlers for a given listener.
     /// </summary>
     /// <typeparam name="MessageType"></typeparam>
-    /// <param name="host"></param>
+    /// <param name="listener"></param>
     /// <returns>True if there were any handlers, false otherwise.</returns>
-    public static bool Unlisten<MessageType>(UnityEngine.Object host)
+    public static bool Unlisten<MessageType>(UnityEngine.Object listener)
     {
-        if (host == null)
-            throw new ArgumentNullException("host");
+        if (listener == null)
+            throw new ArgumentNullException("listener");
 
-        return UnregisterInternal(typeof(MessageType), host, (eventEntry, index, referenceHost) => object.ReferenceEquals(eventEntry.hosts[index], referenceHost));
+        return UnregisterInternal(typeof(MessageType), listener, (eventEntry, index, referenceListener) => object.ReferenceEquals(eventEntry.listeners[index], referenceListener));
     }
 
     /// <summary>
-    /// Unregisters all message types for a given host.
+    /// Unregisters all message types for a given listener.
     /// </summary>
-    /// <param name="host"></param>
+    /// <param name="listener"></param>
     /// <returns>True if there were any handlers, false otherwise.</returns>
-    public static bool UnlistenAll(UnityEngine.Object host)
+    public static bool UnlistenAll(UnityEngine.Object listener)
     {
-        if (host == null)
-            throw new ArgumentNullException("host");
+        if (listener == null)
+            throw new ArgumentNullException("listener");
 
         bool anyListeners = false;
         foreach (var entry in s_entriesList)
         {
-            anyListeners |= UnregisterInternal(entry, host, (eventEntry, index, referenceHost) => object.ReferenceEquals(eventEntry.hosts[index], referenceHost));
+            anyListeners |= UnregisterInternal(entry, listener, (eventEntry, index, referenceListener) => object.ReferenceEquals(eventEntry.listeners[index], referenceListener));
         }
 
         return anyListeners;
@@ -123,7 +123,7 @@ public static partial class EventBetter
     }
 
     /// <summary>
-    /// Removes handlers that will now longer be called because their hosts have been destroyed. Normally
+    /// Removes handlers that will now longer be called because their listeners have been destroyed. Normally
     /// there's no reason to call that, since EventBetter does it behind the scenes in every LateUpdate.
     /// </summary>
     public static void RemoveUnusedHandlers()
@@ -284,13 +284,13 @@ public static partial class EventBetter
     {
         public uint invocationCount = 0;
         public bool needsCleanup = false;
-        public readonly List<object> hosts = new List<object>();
+        public readonly List<object> listeners = new List<object>();
         public readonly List<Delegate> handlers = new List<Delegate>();
         public readonly List<HandlerFlags> flags = new List<HandlerFlags>();
 
         public int Count
         {
-            get { return hosts.Count; }
+            get { return listeners.Count; }
         }
 
         public bool HasFlag(int i, HandlerFlags flag)
@@ -310,32 +310,32 @@ public static partial class EventBetter
             }
         }
 
-        public void Add(object host, Delegate handler, HandlerFlags flag)
+        public void Add(object listener, Delegate handler, HandlerFlags flag)
         {
-            UnityEngine.Debug.Assert(hosts.Count == handlers.Count);
+            UnityEngine.Debug.Assert(listeners.Count == handlers.Count);
 
             // if not in a handler, don't set this flag as it would ignore first
             // nested handler
             if (invocationCount == 0)
                 flag &= ~HandlerFlags.DontInvokeIfAddedInAHandler;
 
-            hosts.Add(host);
+            listeners.Add(listener);
             handlers.Add(handler);
             flags.Add(flag);
         }
 
         public void NullifyAt(int i)
         {
-            UnityEngine.Debug.Assert(hosts.Count == handlers.Count);
-            hosts[i] = null;
+            UnityEngine.Debug.Assert(listeners.Count == handlers.Count);
+            listeners[i] = null;
             handlers[i] = null;
             flags[i] = HandlerFlags.None;
         }
 
         public void RemoveAt(int i)
         {
-            UnityEngine.Debug.Assert(hosts.Count == handlers.Count);
-            hosts.RemoveAt(i);
+            UnityEngine.Debug.Assert(listeners.Count == handlers.Count);
+            listeners.RemoveAt(i);
             handlers.RemoveAt(i);
             flags.RemoveAt(i);
         }
@@ -377,22 +377,22 @@ public static partial class EventBetter
 
             for (int i = 0; i < entry.Count; ++i)
             {
-                var host = GetAliveTarget(entry.hosts[i]);
+                var listener = GetAliveTarget(entry.listeners[i]);
 
                 bool removeHandler = true;
 
-                if (host != null)
+                if (listener != null)
                 {
                     if (entry.HasFlag(i, HandlerFlags.OnlyIfActiveAndEnabled))
                     {
-                        var behaviour = host as UnityEngine.Behaviour;
+                        var behaviour = listener as UnityEngine.Behaviour;
                         if (!ReferenceEquals(behaviour, null))
                         {
                             if (!behaviour.isActiveAndEnabled)
                                 continue;
                         }
 
-                        var go = host as GameObject;
+                        var go = listener as GameObject;
                         if (!ReferenceEquals(go, null))
                         {
                             if (!go.activeInHierarchy)
@@ -465,23 +465,23 @@ public static partial class EventBetter
         return hadActiveHandlers;
     }
 
-    private static Delegate RegisterInternal<HostType, MessageType>(HostType host, System.Action<MessageType> handler, HandlerFlags flags)
+    private static Delegate RegisterInternal<ListenerType, MessageType>(ListenerType listener, System.Action<MessageType> handler, HandlerFlags flags)
     {
-        return RegisterInternal(typeof(MessageType), host, handler, flags);
+        return RegisterInternal(typeof(MessageType), listener, handler, flags);
     }
 
-    private static Delegate RegisterInternal(Type messageType, object host, Delegate handler, HandlerFlags flags)
+    private static Delegate RegisterInternal(Type messageType, object listener, Delegate handler, HandlerFlags flags)
     {
         if (messageType == null)
             throw new ArgumentNullException("messageType");
-        if (host == null)
-            throw new ArgumentNullException("host");
+        if (listener == null)
+            throw new ArgumentNullException("listener");
         if (handler == null)
             throw new ArgumentNullException("handler");
 
         if ((flags & HandlerFlags.IsUnityObject) == HandlerFlags.IsUnityObject)
         {
-            Debug.Assert(host is UnityEngine.Object);
+            Debug.Assert(listener is UnityEngine.Object);
             EnsureWorkerExistsAndIsActive();
         }
 
@@ -493,7 +493,7 @@ public static partial class EventBetter
             s_entriesList.Add(entry);
         }
 
-        entry.Add(host, handler, flags);
+        entry.Add(listener, handler, flags);
 
         return handler;
     }
@@ -520,7 +520,7 @@ public static partial class EventBetter
 
         for (int i = 0; i < entry.Count; ++i)
         {
-            if (entry.hosts[i] == null)
+            if (entry.listeners[i] == null)
                 continue;
 
             if (predicate != null && !predicate(entry, i, param))
@@ -563,15 +563,15 @@ public static partial class EventBetter
     {
         for (int i = 0; i < entry.Count; ++i)
         {
-            var host = entry.hosts[i];
+            var listener = entry.listeners[i];
             if (entry.HasFlag(i, HandlerFlags.IsUnityObject))
             {
-                if ((UnityEngine.Object)host != null)
+                if ((UnityEngine.Object)listener != null)
                     continue;
             }
             else
             {
-                if (host != null)
+                if (listener != null)
                     continue;
             }
 
