@@ -458,6 +458,7 @@ public static partial class EventBetter
 
             if (invocationCount == 1 && entry.needsCleanup)
             {
+                entry.needsCleanup = false;
                 RemoveUnusedHandlers(entry);
             }
         }
