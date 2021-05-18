@@ -4,7 +4,7 @@ A Unity pubsub/messaging/event system for the lazy. No interfaces to implement, 
 # TL;DR:
 Copy [EventBetter.cs](Assets/Plugins/EventBetter/EventBetter.cs) anywhere to your project. The API you need to know is `EventBetter.Listen` and `EventBetter.Raise`. Done! Example:
 
-```
+```cs
 class TextMessage
 {
     public string text;
@@ -39,7 +39,7 @@ It is possible thanks to UnityEngine.Object being the main citizen in the Unity 
 
 Maybe you like async/await more?
 
-```
+```cs
 class SimpleConsumerAsync : MonoBehaviour
 {
     async void Awake()
@@ -51,7 +51,7 @@ class SimpleConsumerAsync : MonoBehaviour
 ```
 
 Or maybe you'd rather stick with good old coroutines?
-```
+```cs
 class SimpleConsumerCoro : MonoBehaviour
 {
     void Awake()
@@ -69,17 +69,17 @@ class SimpleConsumerCoro : MonoBehaviour
 ```
 
 Back to the basic Listen, maybe you want to stop listening after the first message arrives?
-```
+```cs
 EventBetter.Listen(this, (TextMessage msg) => Debug.Log(msg.text, this), once: true);
 ```
 
 Or listen only if the listening script is active and enabled?
-```
+```cs
 EventBetter.Listen(this, (TextMessage msg) => Debug.Log(msg.text, this), exculdeInactive: true);
 ```
 
 If you are not in a MonoBehaviour and still want to use EventBetter, use:
-```
+```cs
 IDisposable listener = EventBetter.ListenManual( (TextMessage msg) => Debug.Log(msg.text, this) );
 // ...
 listener.Dispose();
