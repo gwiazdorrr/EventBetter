@@ -1,5 +1,16 @@
 # EventBetter
-A Unity pubsub/messaging/event system for the lazy. No interfaces to implement, no base types to derive from, no initialization, no message codes, no OnEnable/OnDisable shenanigans, no memory leaks, no casting, lightweight, easy to extend, async/coroutine friendly, .NET3.5 compatible, one source file (everything else here is just for the test environment). Raising events is alloc-free.
+A Unity pubsub/messaging/event system for the lazy. 
+- raising events is alloc-free
+- one source file (everything else here is just for the test environment)
+- no interfaces to implement and no base types to derive from
+- no initialization needed
+- no cleanup needed
+- no memory leaks
+- no message codes
+- no OnEnable/OnDisable shenanigans
+- no casting needed
+- lightweight
+- async/coroutine friendly
 
 # TL;DR:
 Copy [EventBetter.cs](Assets/Plugins/EventBetter/EventBetter.cs) anywhere to your project. The API you need to know is `EventBetter.Listen` and `EventBetter.Raise`. Done! Example:
