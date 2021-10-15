@@ -1,0 +1,9 @@
+{
+    "name": "com.gwiazdorrr.eventbetter",
+    "displayName": "EventBetter",
+    "version": "1.0.0",
+    "documentationUrl": "https://github.com/gwiazdorrr/EventBetter",
+    "changelogUrl": "https://github.com/gwiazdorrr/EventBetter",
+    "licensesUrl": "https://github.com/gwiazdorrr/EventBetter/blob/master/LICENSE",
+    "description": "A Unity pubsub/messaging/event system for the lazy."
+  }
