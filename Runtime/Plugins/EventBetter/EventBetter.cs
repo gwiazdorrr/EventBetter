@@ -282,7 +282,7 @@ public static partial class EventBetter
 
         private void LateUpdate()
         {
-            Debug.Assert(instanceId != s_worker.instanceId);
+            Debug.Assert(instanceId == s_worker.instanceId);
             EventBetter.RemoveUnusedHandlers();
         }
     }
