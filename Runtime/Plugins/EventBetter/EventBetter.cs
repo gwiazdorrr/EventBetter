@@ -273,9 +273,16 @@ public static partial class EventBetter
 
     private sealed class EventBetterWorker : MonoBehaviour
     {
+        private int instanceId;
+
+        void Awake()
+        {
+            instanceId = this.GetInstanceID();
+        }
+
         private void LateUpdate()
         {
-            Debug.Assert(this == s_worker);
+            Debug.Assert(instanceId == s_worker.instanceId);
             EventBetter.RemoveUnusedHandlers();
         }
     }
