@@ -8,14 +8,10 @@ A Unity pubsub/messaging/event system for the lazy. Here's why:
 - One source file (everything else here is just for the test environment).
 - Clear and readable.
 
-# Installation
-
-Add the following line to *Packages/manifest.json*:
-  - `"com.gwiazdorrr.eventbetter": "git+https://github.com/Leinnan/EventBetter",`
-
-
 # TL;DR:
-Copy [EventBetter.cs](Assets/Plugins/EventBetter/EventBetter.cs) anywhere to your project. The API you need to know is `EventBetter.Listen` and `EventBetter.Raise`. Done! Example:
+Copy [EventBetter.cs](Assets/Plugins/EventBetter/EventBetter.cs) anywhere to your project or add `https://github.com/gwiazdorrr/EventBetter.git` in `Package Manager` (`Add package from git URL...`). The API you need to know is `EventBetter.Listen` and `EventBetter.Raise`. Done!
+
+Example:
 
 ```cs
 class TextMessage
