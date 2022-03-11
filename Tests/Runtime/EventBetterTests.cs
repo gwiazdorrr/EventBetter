@@ -591,15 +591,22 @@ public class EventBetterTests
         }
     }
 
-    [SetUp]
-    public void SetUp()
+    [UnitySetUp]
+    public IEnumerator SetUp()
     {
         EventBetter.Clear();
+        var go = GameObject.Find("EventBetterWorker");
+        if (go)
+        {
+            Object.DestroyImmediate(go);
+        }
+        yield break;
     }
 
-    [TearDown]
-    public void TearDown()
+    [UnityTearDown]
+    public IEnumerator TearDown()
     {
+        yield return null;
         bool wasLeaking = EventBetter.Test_IsLeaking;
         EventBetter.Clear();
         Assert.IsFalse(wasLeaking);

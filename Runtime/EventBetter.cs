@@ -72,7 +72,7 @@ public static partial class EventBetter
     /// <returns>True if there are any handlers for this message type, false otherwise.</returns>
     public static bool Raise<MessageType>(MessageType message)
     {
-        return Raise(message, typeof(MessageType));
+        return RaiseInternal(message);
     }
 
     /// <summary>
@@ -357,26 +357,21 @@ public static partial class EventBetter
     /// </summary>
     private static List<EventEntry> s_entriesList = new List<EventEntry>();
     /// <summary>
-    /// To avoid allocs when raising.
-    /// </summary>
-    private static object[] s_args = new object[1];
-    /// <summary>
     /// For removing dead handlers.
     /// </summary>
     private static EventBetterWorker s_worker;
 
 
-    private static bool Raise(object message, Type messageType)
+    private static bool RaiseInternal<T>(T message)
     {
         EventEntry entry;
 
-        if (!s_entries.TryGetValue(messageType, out entry))
+        if (!s_entries.TryGetValue(typeof(T), out entry))
             return false;
 
         bool hadActiveHandlers = false;
 
         var invocationCount = ++entry.invocationCount;
-        var args = s_args;
 
         try
         {
@@ -422,20 +417,7 @@ public static partial class EventBetter
                         removeHandler = false;
                     }
 
-                    try
-                    {
-                        // This prevents the code from allocating anything, making it effectively single-threaded - that's fine,
-                        // since it revolves around UnityEngine.Objects, which are inherently single-threaded.
-                        // Also, this *seems* to be safe, as DynamicInvoke eventually calls MethodBase.CheckArguments,
-                        // and it copies the array
-                        // https://github.com/Microsoft/referencesource/blob/60a4f8b853f60a424e36c7bf60f9b5b5f1973ed1/mscorlib/system/reflection/methodbase.cs#L338
-                        args[0] = message;
-                        entry.handlers[i].DynamicInvoke(args);
-                    }
-                    finally
-                    {
-                        args[0] = null;
-                    }
+                    ((Action<T>)entry.handlers[i])(message);
 
                     hadActiveHandlers = true;
                 }
@@ -475,13 +457,11 @@ public static partial class EventBetter
 
     private static Delegate RegisterInternal<ListenerType, MessageType>(ListenerType listener, System.Action<MessageType> handler, HandlerFlags flags)
     {
-        return RegisterInternal(typeof(MessageType), listener, handler, flags);
+        return RegisterInternal<MessageType>(listener, handler, flags);
     }
 
-    private static Delegate RegisterInternal(Type messageType, object listener, Delegate handler, HandlerFlags flags)
+    private static Delegate RegisterInternal<T>(object listener, Action<T> handler, HandlerFlags flags)
     {
-        if (messageType == null)
-            throw new ArgumentNullException("messageType");
         if (listener == null)
             throw new ArgumentNullException("listener");
         if (handler == null)
@@ -494,10 +474,10 @@ public static partial class EventBetter
         }
 
         EventEntry entry;
-        if (!s_entries.TryGetValue(messageType, out entry))
+        if (!s_entries.TryGetValue(typeof(T), out entry))
         {
             entry = new EventEntry();
-            s_entries.Add(messageType, entry);
+            s_entries.Add(typeof(T), entry);
             s_entriesList.Add(entry);
         }
 
