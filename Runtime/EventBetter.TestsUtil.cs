@@ -20,12 +20,4 @@ public static partial class EventBetter
             return false;
         }
     }
-
-    public static MonoBehaviour Test_Worker
-    {
-        get
-        {
-            return s_worker;
-        }
-    }
 }

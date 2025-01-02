@@ -121,7 +121,7 @@ public class EventBetterTests
             Assert.IsFalse(EventBetter.Raise(new TestMessage()));
             Assert.AreEqual(3, count);
 
-            EventBetter.Listen(this, (TestMessage o) => ++count, exculdeInactive: true);
+            EventBetter.Listen(this, (TestMessage o) => ++count, excludeInactive: true);
             Assert.IsTrue(EventBetter.Raise(new TestMessage()));
             Assert.AreEqual(4, count);
 
@@ -171,34 +171,7 @@ public class EventBetterTests
                 Assert.IsFalse(EventBetter.UnlistenAll(this));
             }
         }
-
-        public void TestWorker()
-        {
-            var worker = GameObject.Find("EventBetterWorker");
-            Assert.IsFalse(worker);
-
-            EventBetter.Listen(this, (TestMessage o) => { });
-            worker = GameObject.Find("EventBetterWorker");
-            Assert.IsTrue(worker);
-            Assert.AreEqual(worker, EventBetter.Test_Worker?.gameObject);
-
-            worker.SetActive(false);
-            Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(this, (TestMessage o) => { }));
-            worker.SetActive(true);
-            EventBetter.Listen(this, (TestMessage o) => { });
-
-            worker.GetComponent<MonoBehaviour>().enabled = false;
-            Assert.Throws<InvalidOperationException>(() => EventBetter.Listen(this, (TestMessage o) => { }));
-            worker.GetComponent<MonoBehaviour>().enabled = true;
-            EventBetter.Listen(this, (TestMessage o) => { });
-
-            DestroyImmediate(worker);
-            EventBetter.Listen(this, (TestMessage o) => { });
-            worker = GameObject.Find("EventBetterWorker");
-            Assert.IsTrue(worker);
-            Assert.AreEqual(worker, EventBetter.Test_Worker?.gameObject);
-        }
-
+        
         public void TestMutableLambda()
         {
             {
@@ -639,7 +612,6 @@ public class EventBetterTests
 
     [UnityTest] public IEnumerator IfActiveAndEnabled() => DoTest(t => t.TestIfActiveAndEnabled());
     [UnityTest] public IEnumerator Once() => DoTest(t => t.TestOnce(), someHandlersRemain: false);
-    [UnityTest] public IEnumerator MessingAroundWithWorker() => DoTest(t => t.TestWorker());
 
     [UnityTest] public IEnumerator Self() => DoTest(t => t.TestSelf());
     [UnityTest] public IEnumerator SelfAdv() => DoTest(t => t.TestSelfAdv());

@@ -3,13 +3,11 @@
 
 using System;
 using System.Collections.Generic;
-using System.Reflection;
-using UnityEngine;
-
-#if NET_4_6
+using System.Linq;
 using System.Threading.Tasks;
-#endif
-
+using UnityEngine;
+using UnityEngine.LowLevel;
+using UnityEngine.PlayerLoop;
 
 
 /// <summary>
@@ -28,20 +26,23 @@ public static partial class EventBetter
     /// <param name="listener"></param>
     /// <param name="handler"></param>
     /// <param name="once">After the <paramref name="handler"/> is invoked - unlisten automatically.</param>
-    /// <param name="exculdeInactive">If <paramref name="listener"/> is a Behaviour or GameObject, will only invoke <paramref name="handler"/>
+    /// <param name="excludeInactive">If <paramref name="listener"/> is a Behaviour or GameObject, will only invoke <paramref name="handler"/>
     /// if <paramref name="listener"/> is active and enabled.</param>
     /// <exception cref="System.InvalidOperationException">Thrown if the internal worker has been disabled somehow.</exception>
     public static void Listen<ListenerType, MessageType>(ListenerType listener, System.Action<MessageType> handler,
         bool once = false,
-        bool exculdeInactive = false)
+        bool excludeInactive = false,
+        bool persistent = false)
         where ListenerType : UnityEngine.Object
     {
         HandlerFlags flags = HandlerFlags.IsUnityObject;
 
         if (once)
             flags |= HandlerFlags.Once;
-        if (exculdeInactive)
+        if (excludeInactive)
             flags |= HandlerFlags.OnlyIfActiveAndEnabled;
+        if (persistent)
+            flags |= HandlerFlags.Persistent;
 
         RegisterInternal(listener, handler, flags);
     }
@@ -100,6 +101,7 @@ public static partial class EventBetter
             throw new ArgumentNullException("listener");
 
         bool anyListeners = false;
+
         foreach (var entry in s_entriesList)
         {
             anyListeners |= UnregisterInternal(entry, listener, (eventEntry, index, referenceListener) => object.ReferenceEquals(eventEntry.listeners[index], referenceListener));
@@ -111,14 +113,19 @@ public static partial class EventBetter
     /// <summary>
     /// Unregisters everything.
     /// </summary>
-    public static void Clear()
+    public static void Clear(bool clearPersistent = true)
     {
-        s_entries.Clear();
-        s_entriesList.Clear();
-        if (s_worker)
+        if (clearPersistent)
         {
-            UnityEngine.Object.Destroy(s_worker.gameObject);
-            s_worker = null;
+            s_entries.Clear();
+            s_entriesList.Clear();
+        }
+        else
+        {
+            foreach (var entry in s_entriesList)
+            {
+                RemoveNonPersistentHandlers(entry);
+            }
         }
     }
 
@@ -187,6 +194,7 @@ public static partial class EventBetter
             {
                 Messages = new List<MessageType>();
             }
+
             Messages.Add(msg);
         }
 
@@ -197,6 +205,7 @@ public static partial class EventBetter
                 Dispose();
                 return false;
             }
+
             return true;
         }
 
@@ -214,8 +223,6 @@ public static partial class EventBetter
 
     #region Async Support
 
-#if NET_4_6
-
     public static async Task<MessageType> ListenAsync<MessageType>()
     {
         var tcs = new TaskCompletionSource<MessageType>();
@@ -232,8 +239,6 @@ public static partial class EventBetter
             EventBetter.UnlistenHandler(typeof(MessageType), handler);
         }
     }
-
-#endif
 
     #endregion
 
@@ -264,36 +269,21 @@ public static partial class EventBetter
     [Flags]
     private enum HandlerFlags
     {
-        None = 0,
-        OnlyIfActiveAndEnabled = 1 << 0,
-        Once = 1 << 1,
+        None                        = 0,
+        OnlyIfActiveAndEnabled      = 1 << 0,
+        Once                        = 1 << 1,
         DontInvokeIfAddedInAHandler = 1 << 2,
-        IsUnityObject = 1 << 3,
-    }
-
-    private sealed class EventBetterWorker : MonoBehaviour
-    {
-        private int instanceId;
-
-        void Awake()
-        {
-            instanceId = this.GetInstanceID();
-        }
-
-        private void LateUpdate()
-        {
-            Debug.Assert(instanceId == s_worker.instanceId);
-            EventBetter.RemoveUnusedHandlers();
-        }
+        IsUnityObject               = 1 << 3,
+        Persistent                  = 1 << 4,
     }
 
     private class EventEntry
     {
-        public uint invocationCount = 0;
-        public bool needsCleanup = false;
-        public readonly List<object> listeners = new List<object>();
-        public readonly List<Delegate> handlers = new List<Delegate>();
-        public readonly List<HandlerFlags> flags = new List<HandlerFlags>();
+        public          uint               invocationCount = 0;
+        public          bool               needsCleanup    = false;
+        public readonly List<object>       listeners       = new List<object>();
+        public readonly List<Delegate>     handlers        = new List<Delegate>();
+        public readonly List<HandlerFlags> flags           = new List<HandlerFlags>();
 
         public int Count
         {
@@ -352,14 +342,11 @@ public static partial class EventBetter
     /// For lookups.
     /// </summary>
     private static Dictionary<Type, EventEntry> s_entries = new Dictionary<Type, EventEntry>();
+
     /// <summary>
     /// For faster iteration.
     /// </summary>
     private static List<EventEntry> s_entriesList = new List<EventEntry>();
-    /// <summary>
-    /// For removing dead handlers.
-    /// </summary>
-    private static EventBetterWorker s_worker;
 
 
     private static bool RaiseInternal<T>(T message)
@@ -388,6 +375,7 @@ public static partial class EventBetter
                     if (entry.HasFlag(i, HandlerFlags.OnlyIfActiveAndEnabled))
                     {
                         var behaviour = listener as UnityEngine.Behaviour;
+
                         if (!ReferenceEquals(behaviour, null))
                         {
                             if (!behaviour.isActiveAndEnabled)
@@ -395,6 +383,7 @@ public static partial class EventBetter
                         }
 
                         var go = listener as GameObject;
+
                         if (!ReferenceEquals(go, null))
                         {
                             if (!go.activeInHierarchy)
@@ -470,10 +459,10 @@ public static partial class EventBetter
         if ((flags & HandlerFlags.IsUnityObject) == HandlerFlags.IsUnityObject)
         {
             Debug.Assert(listener is UnityEngine.Object);
-            EnsureWorkerExistsAndIsActive();
         }
 
         EventEntry entry;
+
         if (!s_entries.TryGetValue(typeof(T), out entry))
         {
             entry = new EventEntry();
@@ -494,6 +483,7 @@ public static partial class EventBetter
     private static bool UnregisterInternal<ParamType>(Type messageType, ParamType param, Func<EventEntry, int, ParamType, bool> predicate)
     {
         EventEntry entry;
+
         if (!s_entries.TryGetValue(messageType, out entry))
         {
             return false;
@@ -515,6 +505,7 @@ public static partial class EventBetter
                 continue;
 
             found = true;
+
             if (entry.invocationCount == 0)
             {
                 // it's ok to compact now
@@ -531,7 +522,7 @@ public static partial class EventBetter
 
         return found;
     }
-    
+
     private static object GetAliveTarget(object target)
     {
         if (target == null)
@@ -552,6 +543,7 @@ public static partial class EventBetter
         for (int i = 0; i < entry.Count; ++i)
         {
             var listener = entry.listeners[i];
+
             if (entry.HasFlag(i, HandlerFlags.IsUnityObject))
             {
                 if ((UnityEngine.Object)listener != null)
@@ -570,23 +562,94 @@ public static partial class EventBetter
         }
     }
 
-    private static void EnsureWorkerExistsAndIsActive()
+    private static void RemoveNonPersistentHandlers(EventEntry entry)
     {
-        if (s_worker)
+        for (int i = 0; i < entry.Count; ++i)
         {
-            if (!s_worker.isActiveAndEnabled)
-                throw new InvalidOperationException("EventBetterWorker is disabled");
+            if (entry.HasFlag(i, HandlerFlags.Persistent))
+            {
+                continue;
+            }
 
-            return;
+            Debug.Assert(entry.invocationCount == 0);
+            entry.RemoveAt(i--);
         }
+    }
 
-        var go = new GameObject("EventBetterWorker", typeof(EventBetterWorker));
-        go.hideFlags = HideFlags.HideAndDontSave;
-        GameObject.DontDestroyOnLoad(go);
+    #endregion
 
-        s_worker = go.GetComponent<EventBetterWorker>();
-        if (!s_worker)
-            throw new InvalidOperationException("Unable to create EventBetterWorker");
+    #region Player Loop System Registration
+
+    struct EventBetterCleanupSystem
+    {
+    }
+
+    static EventBetter()
+    {
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.playModeStateChanged += (change) =>
+        {
+            if (change == UnityEditor.PlayModeStateChange.ExitingPlayMode || change == UnityEditor.PlayModeStateChange.ExitingEditMode)
+            {
+                Clear(clearPersistent: false);
+            }
+        };
+#endif
+        
+        var rootPlayerLoopSystem = PlayerLoop.GetCurrentPlayerLoop();
+        var playerLoopSystemTypes = GetPlayerLoopSystemHierarchy(typeof(PreLateUpdate.ScriptRunBehaviourLateUpdate));
+        RegisterPlayerLoopSystem(ref rootPlayerLoopSystem, playerLoopSystemTypes);
+        PlayerLoop.SetPlayerLoop(rootPlayerLoopSystem);
+        
+        Type[] GetPlayerLoopSystemHierarchy(Type systemType)
+        {
+            List<Type> result = new();
+            for (var t = systemType; t != null; t = t.DeclaringType)
+            {
+                result.Insert(0, t);
+            }
+
+            return result.ToArray();
+        }
+        
+        void RegisterPlayerLoopSystem(ref PlayerLoopSystem parentSystem, Span<Type> subSystemTypes)
+        {
+            Debug.Assert(subSystemTypes.Length >= 1);
+            
+            ref PlayerLoopSystem[] list = ref parentSystem.subSystemList;
+            if (list != null)
+            {
+                for (int i = 0; i < list.Length; ++i)
+                {
+                    if (list[i].type != subSystemTypes[0])
+                    {
+                        continue;
+                    }
+
+                    if (subSystemTypes.Length == 1)
+                    {
+                        // insert after
+                        var newSystem = new PlayerLoopSystem()
+                        {
+                            type = typeof(EventBetterCleanupSystem),
+                            updateDelegate = EventBetter.RemoveUnusedHandlers
+                        };
+                        List<PlayerLoopSystem> tmpList = list.ToList();
+                        tmpList.Insert(i+1, newSystem);
+                        list = tmpList.ToArray();
+                    }
+                    else
+                    {
+                        RegisterPlayerLoopSystem(ref list[i], subSystemTypes.Slice(1));
+                    }
+
+                    
+                    return;
+                }
+            }
+
+            throw new InvalidOperationException($"SubSystem {subSystemTypes[0]} is not found in {parentSystem.type}");
+        }
     }
 
     #endregion
